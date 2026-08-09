@@ -1,0 +1,5 @@
+FROM alpine:3
+RUN apk add --no-cache curl tzdata
+COPY cron-entrypoint.sh /cron-entrypoint.sh
+RUN chmod +x /cron-entrypoint.sh
+CMD /cron-entrypoint.sh
