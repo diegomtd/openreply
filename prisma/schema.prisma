@@ -75,6 +75,15 @@ model Workspace {
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
+  /// Anti-flood across every automation in the workspace: one person receives at
+  /// most one automated DM per this many hours, no matter how many campaigns
+  /// they match. 0 disables the global cap and leaves frequency entirely to each
+  /// automation's own sendFrequency.
+  contactCooldownHours Int @default(12)
+  /// Extra words that opt a contact out of every automation when they DM them.
+  /// Merged with the built-in list (stop / parar / sair / cancelar / …).
+  optOutKeywords       String[] @default([])
+
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
@@ -84,6 +93,7 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  contacts          Contact[]
 
   @@index([ownerId])
 }
@@ -141,6 +151,7 @@ model InstagramAccount {
   dmLogs      DmLog[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  contacts    Contact[]
 
   @@index([workspaceId])
 }
@@ -200,6 +211,13 @@ model Automation {
   publicReplyMessages String[] @default([])
   isActive       Boolean @default(true)
   wholeWordMatch Boolean @default(true)
+  /// How often the same person may receive this automation. Defaults to once
+  /// ever, because re-sending the same automated message to someone who already
+  /// got it is the single most common way this tool annoys real users.
+  sendFrequency       SendFrequency @default(ONCE_PER_CONTACT)
+  /// Only read when sendFrequency is COOLDOWN: hours to wait before the same
+  /// person may receive this automation again.
+  resendCooldownHours Int           @default(24)
   reportShareSlug    String? @unique
   reportShareEnabled Boolean @default(true)
 
@@ -211,6 +229,7 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  contactStates    ContactAutomationState[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -251,6 +270,8 @@ model DmLog {
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([status])
+  @@index([commenterId])
+  @@index([automationId, commenterId])
 }
 
 // Every comment the system has seen, from either the webhook or the polling
@@ -311,6 +332,71 @@ model LinkClick {
   @@index([workspaceId, createdAt])
 }
 
+/// A person who has interacted with one connected Instagram account, keyed by
+/// their IGSID. This is the entity automation frequency is decided against:
+/// "has this person already had this?" rather than "have I seen this message
+/// id?". Without it, every inbound DM re-triggers the same automation forever.
+model Contact {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  /// Instagram-scoped user id from the webhook. Unique per connected account.
+  igsid              String
+  username           String?
+  name               String?
+
+  firstSeenAt   DateTime  @default(now())
+  lastInboundAt DateTime?
+
+  /// Last time ANY automation delivered a message to this person, and how many
+  /// in total. Drives the workspace-wide anti-flood cap.
+  lastAutomationSentAt DateTime?
+  automationSentCount  Int       @default(0)
+
+  /// Opted out of every automation — by sending a stop word, or muted by hand
+  /// from the Contacts screen. Never receives an automated message again.
+  optedOut       Boolean   @default(false)
+  optedOutAt     DateTime?
+  optedOutReason String?
+
+  tags String[] @default([])
+  note String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  automationStates ContactAutomationState[]
+
+  @@unique([instagramAccountId, igsid])
+  @@index([workspaceId])
+  @@index([workspaceId, lastAutomationSentAt])
+  @@index([workspaceId, optedOut])
+}
+
+/// One row per (person, automation, scope) that has actually been delivered.
+/// `scopeKey` is the media id for a comment trigger and the literal "dm" for the
+/// DM trigger, which is what lets ONCE_PER_POST behave like ManyChat (one send
+/// per person per post) while ONCE_PER_CONTACT ignores the scope entirely.
+model ContactAutomationState {
+  id           String @id @default(cuid())
+  contactId    String
+  automationId String
+  scopeKey     String
+
+  sentCount   Int      @default(0)
+  firstSentAt DateTime @default(now())
+  lastSentAt  DateTime @default(now())
+
+  contact    Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, automationId, scopeKey])
+  @@index([automationId])
+  @@index([contactId, lastSentAt])
+}
+
 model WebhookEvent {
   id          String        @id @default(cuid())
   workspaceId String?
@@ -325,6 +411,7 @@ model WebhookEvent {
 
   @@index([workspaceId])
   @@index([status])
+  @@index([createdAt])
 }
 
 model OperationalEvent {
@@ -366,6 +453,25 @@ enum DmStatus {
   SKIPPED_RATE_LIMIT
   SKIPPED_PLAN_LIMIT
   SKIPPED_NO_MATCH
+  /// This person already received this automation and it is set to send once.
+  SKIPPED_ALREADY_SENT
+  /// Blocked by a frequency window: the automation's own cooldown, or the
+  /// workspace-wide anti-flood cap.
+  SKIPPED_COOLDOWN
+  /// The contact opted out (stop word) or was muted from the Contacts screen.
+  SKIPPED_OPTED_OUT
+}
+
+enum SendFrequency {
+  /// One delivery per person, ever, regardless of which post they came from.
+  ONCE_PER_CONTACT
+  /// One delivery per person per post (ManyChat's comment-trigger behaviour).
+  /// Falls back to once-per-person for the DM trigger, which has no post.
+  ONCE_PER_POST
+  /// May send again once resendCooldownHours have passed.
+  COOLDOWN
+  /// No per-contact limit. Only the workspace anti-flood cap applies.
+  ALWAYS
 }
 
 enum WebhookStatus {

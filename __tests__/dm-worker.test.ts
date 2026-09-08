@@ -31,6 +31,16 @@ const {
     instagramAccount: {
       findUnique: vi.fn(),
     },
+    contact: {
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    contactAutomationState: {
+      findMany: vi.fn(),
+      upsert: vi.fn(),
+    },
+    $transaction: vi.fn(),
     operationalEvent: {
       create: vi.fn(),
     },
@@ -157,7 +167,12 @@ const mockAutomation = {
   },
   workspace: {
     id: "workspace_123",
+    // Off by default so the per-automation rule is what each test exercises.
+    contactCooldownHours: 0,
+    optOutKeywords: [],
   },
+  sendFrequency: "ONCE_PER_CONTACT",
+  resendCooldownHours: 24,
   trackedLinks: [],
 };
 
@@ -226,8 +241,24 @@ beforeEach(() => {
   mockPrisma.dmLog.upsert.mockResolvedValue({});
   mockPrisma.dmLog.update.mockResolvedValue({});
   mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+    id: "ig_account_row_1",
     workspaceId: "workspace_123",
+    workspace: { contactCooldownHours: 0, optOutKeywords: [] },
   });
+  // A contact nobody has messaged yet: no history, not opted out.
+  mockPrisma.contact.upsert.mockResolvedValue({
+    id: "contact_1",
+    optedOut: false,
+    lastAutomationSentAt: null,
+    username: "commenter_user",
+  });
+  mockPrisma.contact.findUnique.mockResolvedValue(null);
+  mockPrisma.contact.update.mockResolvedValue({});
+  mockPrisma.contactAutomationState.findMany.mockResolvedValue([]);
+  mockPrisma.contactAutomationState.upsert.mockResolvedValue({});
+  mockPrisma.$transaction.mockImplementation(async (ops: unknown) =>
+    Array.isArray(ops) ? Promise.all(ops) : ops
+  );
   mockPrisma.operationalEvent.create.mockResolvedValue({});
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
@@ -289,7 +320,9 @@ describe("DM Worker — Full Pipeline", () => {
       },
       include: {
         instagramAccount: true,
-        workspace: true,
+        workspace: {
+          select: { id: true, contactCooldownHours: true, optOutKeywords: true },
+        },
         trackedLinks: {
           select: {
             slug: true,
@@ -1063,6 +1096,143 @@ describe("DM Worker — DM keyword trigger", () => {
     expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ status: "SKIPPED_PLAN_LIMIT" }),
+      })
+    );
+  });
+
+  // The reported bug: every inbound message carried a new mid, so the per-message
+  // dedupe never matched and the same person was answered again and again.
+  it("should not re-send to someone who already received this automation", async () => {
+    mockPrisma.contactAutomationState.findMany.mockResolvedValue([
+      {
+        scopeKey: "dm",
+        sentCount: 1,
+        lastSentAt: new Date("2026-09-01T10:00:00.000Z"),
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageId: "mid_second" }));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_ALREADY_SENT",
+          errorMessage: expect.stringContaining("Already sent to this contact"),
+        }),
+      })
+    );
+  });
+
+  it("should re-send after the cooldown when the campaign allows it", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...dmTriggerAutomation,
+        sendFrequency: "COOLDOWN",
+        resendCooldownHours: 24,
+      },
+    ]);
+    mockPrisma.contactAutomationState.findMany.mockResolvedValue([
+      {
+        scopeKey: "dm",
+        sentCount: 1,
+        lastSentAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageId: "mid_later" }));
+
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should record the delivery against the contact so the next message is blocked", async () => {
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockPrisma.contactAutomationState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          contactId_automationId_scopeKey: {
+            contactId: "contact_1",
+            automationId: "auto_789",
+            scopeKey: "dm",
+          },
+        },
+      })
+    );
+  });
+
+  it("should not record a delivery when Meta rejected the send", async () => {
+    mockSendDirectMessage.mockRejectedValue(new Error("Meta is down"));
+
+    const processor = getProcessor();
+    await expect(processor(createMockMessageJob())).rejects.toThrow(
+      "Meta is down"
+    );
+
+    expect(mockPrisma.contactAutomationState.upsert).not.toHaveBeenCalled();
+  });
+
+  it("should mute the contact and stay silent when they ask to stop", async () => {
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageText: "parar" }));
+
+    expect(mockPrisma.contact.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "contact_1" },
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    // No campaign is even looked up — an opt-out can never trigger a reply.
+    expect(mockPrisma.automation.findMany).not.toHaveBeenCalled();
+  });
+
+  it("should send nothing to an already muted contact", async () => {
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: true,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ status: "SKIPPED_OPTED_OUT" }),
+      })
+    );
+  });
+
+  it("should hold back a second automation inside the workspace anti-flood window", async () => {
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+      id: "ig_account_row_1",
+      workspaceId: "workspace_123",
+      workspace: { contactCooldownHours: 12, optOutKeywords: [] },
+    });
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: new Date(Date.now() - 60 * 60 * 1000),
+      username: "commenter_user",
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_COOLDOWN",
+          errorMessage: expect.stringContaining("Another automation"),
+        }),
       })
     );
   });
