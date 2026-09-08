@@ -45,8 +45,18 @@ interface WorkspaceMembersData {
   }>;
 }
 
+interface AutomationRules {
+  contactCooldownHours: number;
+  optOutKeywords: string[];
+}
+
 export default function SettingsPage() {
   const [data, setData] = useState<SettingsData | null>(null);
+  const [rules, setRules] = useState<AutomationRules | null>(null);
+  const [cooldownDraft, setCooldownDraft] = useState("12");
+  const [optOutDraft, setOptOutDraft] = useState("");
+  const [rulesSaved, setRulesSaved] = useState(false);
+  const [rulesError, setRulesError] = useState<string | null>(null);
   const [membersData, setMembersData] = useState<WorkspaceMembersData | null>(
     null
   );
@@ -60,10 +70,16 @@ export default function SettingsPage() {
     Promise.all([
       fetch("/api/dashboard/stats").then((res) => res.json()),
       fetch("/api/workspace/members").then((res) => res.json()),
+      fetch("/api/workspace/settings").then((res) => res.json()),
     ])
-      .then(([statsPayload, membersPayload]) => {
+      .then(([statsPayload, membersPayload, rulesPayload]) => {
         if (statsPayload.success) setData(statsPayload.data);
         if (membersPayload.success) setMembersData(membersPayload.data);
+        if (rulesPayload.success) {
+          setRules(rulesPayload.data);
+          setCooldownDraft(String(rulesPayload.data.contactCooldownHours));
+          setOptOutDraft(rulesPayload.data.optOutKeywords.join(", "));
+        }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -72,6 +88,37 @@ export default function SettingsPage() {
     const res = await fetch("/api/workspace/members");
     const payload = await res.json();
     if (payload.success) setMembersData(payload.data);
+  }
+
+  async function saveAutomationRules(event: React.FormEvent) {
+    event.preventDefault();
+    setRulesError(null);
+    setRulesSaved(false);
+    setBusy("rules");
+
+    const hours = Math.max(0, Math.min(8760, Number(cooldownDraft) || 0));
+    const res = await fetch("/api/workspace/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contactCooldownHours: hours,
+        optOutKeywords: optOutDraft
+          .split(",")
+          .map((word) => word.trim())
+          .filter(Boolean),
+      }),
+    });
+    const payload = await res.json();
+    setBusy(null);
+
+    if (!payload.success) {
+      setRulesError(payload.error ?? "Could not save");
+      return;
+    }
+    setRules(payload.data);
+    setCooldownDraft(String(payload.data.contactCooldownHours));
+    setOptOutDraft(payload.data.optOutKeywords.join(", "));
+    setRulesSaved(true);
   }
 
   async function disconnectInstagram(instagramAccountId: string) {
@@ -318,6 +365,76 @@ export default function SettingsPage() {
             )}
           </form>
         )}
+      </section>
+
+      <section className="panel rounded p-4 sm:p-6">
+        <h2 className="text-base font-semibold mb-2">Automation rules</h2>
+        <p className="mb-6 text-xs text-muted">
+          These apply on top of every automation&apos;s own frequency setting.
+        </p>
+
+        <form onSubmit={saveAutomationRules} className="space-y-5">
+          <div>
+            <label
+              htmlFor="contactCooldownHours"
+              className="text-sm font-medium text-foreground"
+            >
+              Never message the same person twice within
+            </label>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                id="contactCooldownHours"
+                type="number"
+                min={0}
+                max={8760}
+                value={cooldownDraft}
+                onChange={(e) => setCooldownDraft(e.target.value)}
+                className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+              />
+              <span className="text-xs text-muted">hours</span>
+            </div>
+            <p className="mt-1.5 text-xs text-muted">
+              A ceiling across all automations, so several matching campaigns
+              cannot each send. 0 turns it off and leaves frequency to each
+              automation. Does not apply when someone taps a button — that is
+              them asking.
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="optOutKeywords"
+              className="text-sm font-medium text-foreground"
+            >
+              Extra opt-out words
+            </label>
+            <input
+              id="optOutKeywords"
+              value={optOutDraft}
+              onChange={(e) => setOptOutDraft(e.target.value)}
+              placeholder="me tira, nao quero mais"
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            />
+            <p className="mt-1.5 text-xs text-muted">
+              Comma separated. A DM that is only one of these words mutes that
+              person across every automation. Already built in: parar, pare,
+              sair, stop, cancelar, descadastrar, unsubscribe, chega.
+            </p>
+          </div>
+
+          {rulesError && <p className="text-xs text-error">{rulesError}</p>}
+
+          <div className="flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={busy === "rules" || !rules}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+            >
+              {busy === "rules" ? "Saving…" : "Save rules"}
+            </button>
+            {rulesSaved && <span className="text-xs text-success">Saved</span>}
+          </div>
+        </form>
       </section>
 
       <section className="panel rounded p-4 sm:p-6">

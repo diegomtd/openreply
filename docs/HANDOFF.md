@@ -78,10 +78,24 @@ multi-tenant.
 - Páginas públicas/SEO: `app/page.tsx`, `manychat-alternative`, `templates`,
   legais (`privacy`, `terms`, `data-deletion`)
 
+### Rotas de API que importam
+
+| Rota | Papel |
+|---|---|
+| `app/api/webhook/route.ts` | Entrada de tudo. 1 insert por entrega (não faz mais update por evento). |
+| `app/api/contacts/route.ts` | GET paginado de contatos + PATCH para mutar/desmutar |
+| `app/api/workspace/settings/route.ts` | Teto anti-flood e palavras de opt-out (owner/admin) |
+| `app/api/automations/route.ts` | CRUD de automação, inclui `sendFrequency` / `resendCooldownHours` |
+| `app/api/dashboard/stats/route.ts` | Números do Home. Reescrito para 1 query da semana + `count()` de contatos. |
+| `app/api/logs/route.ts` | Logs paginados, filtráveis pelos novos status de skip |
+
 ### Cron endpoints (`app/api/cron/*`, protegidos por `CRON_SECRET`)
 
 `refresh-tokens` (05h) · `attach-next-reel` (06h) · `snapshot-followers` (07h) ·
-`prune` (03h, retenção de dados)
+`prune` (03h30, retenção de dados)
+
+Registrados em dois lugares: `cron-entrypoint.sh` (VPS/EasyPanel, o que vale em
+produção) e `vercel.json` (caso rode na Vercel). Ao adicionar um cron, os dois.
 
 ---
 
@@ -129,13 +143,23 @@ Não era echo de webhook (`is_echo` já era filtrado) nem retry da fila.
 
 **Correção implementada:** estado por contato (`Contact` +
 `ContactAutomationState`) e política de frequência por automação
-(`sendFrequency`: `ONCE_PER_CONTACT` padrão / `COOLDOWN` / `ALWAYS`), mais:
+(`sendFrequency`: `ONCE_PER_CONTACT` padrão / `ONCE_PER_POST` / `COOLDOWN` /
+`ALWAYS`), mais:
 
-1. Teto global anti-flood por contato (`InstagramAccount.contactCooldownHours`),
-   válido para *todas* as automações somadas.
+1. Teto global anti-flood por contato (`Workspace.contactCooldownHours`, padrão
+   12h), válido para *todas* as automações somadas.
 2. Palavras de opt-out (`parar`, `sair`, `stop`, ...) → `Contact.optedOut = true`,
    nunca recebe automação de novo.
 3. Skips ficam **visíveis** em DmLog com status próprio, em vez de silêncio.
+4. Toque em botão (postback) e follow-up respeitam `optedOut`, mas **não** as
+   demais regras de frequência: um toque é a pessoa pedindo explicitamente.
+5. Histórico antigo entra com `scopeKey = "legacy"` (o `DmLog` nunca guardou o
+   media id). `ONCE_PER_CONTACT` ignora o scope, então para o padrão o guard é
+   exato; só `ONCE_PER_POST` não tem histórico por post anterior à migration.
+
+**Onde se ajusta na UI:** frequência por automação no construtor (seção *"But
+only send"*); teto global e palavras de opt-out em **Configurações → Automation
+rules**; mute manual em **Contatos**.
 
 **Invariante a nunca quebrar:** *nenhum caminho de envio automático
 (`processComment`, `processMessage`, `processPostback`) pode enviar sem passar por
@@ -168,12 +192,16 @@ Feito:
   `workspaceId`).
 - `processMessage` sem N+1: um único lote de queries para logs/estado, em vez de
   2 queries por automação.
-- Dashboard: os 7 `COUNT` sequenciais viraram **1 `groupBy`**; contagem de
-  contatos virou `count()` em vez de carregar todos os IDs distintos.
+- Dashboard: os 7 `COUNT` sequenciais viraram **1 query da semana** agrupada em
+  memória; contagem de contatos virou `count()` na tabela `Contact` em vez de
+  carregar todos os `commenterId` distintos.
 - Cron `prune`: retenção de `WebhookEvent` (7d), `OperationalEvent` INFO (14d),
   `ProcessedComment` (30d). Sem isso as tabelas crescem para sempre.
 - Índices novos: `DmLog(commenterId)`, `DmLog(automationId, commenterId)`,
-  `WebhookEvent(createdAt)`, `Contact(instagramAccountId, igsid)`.
+  `WebhookEvent(createdAt)`, `Contact(instagramAccountId, igsid)` e os índices de
+  filtro de `Contact` / `ContactAutomationState`.
+- Deletes do `prune` são **sequenciais** de propósito: três DELETE em massa
+  simultâneos numa VPS de 1 core derrubam o app junto.
 
 Regras para mudanças futuras:
 
@@ -190,14 +218,18 @@ Regras para mudanças futuras:
 Ordem final, espelhando ManyChat mas enxuta:
 
 ```
-Home            → /dashboard      (números do dia + saúde do sistema)
-Inbox           → /inbox          (conversas, janela de 24h)
-Contatos        → /contacts       (pessoas, tags, opt-out, histórico)  ← novo
-Automações      → /automations    (lista, criar, templates)
-Análise         → /overview       (crescimento, cliques, CTR, relatórios)
-Logs            → /logs           (cada envio/skip/falha com motivo)
-Configurações   → /settings
-Diagnóstico     → /diagnostics
+Home            → /dashboard   (números do dia + saúde do sistema)
+Inbox           → /inbox       (conversas, janela de 24h)
+Contatos        → /contacts    (pessoas, histórico de envios, mute)  ← novo
+
+── Automation ──
+Automations     → /campaigns   (lista, criar, templates)
+Analytics       → /overview    (crescimento, cliques, CTR, relatórios)
+DM Logs         → /logs        (cada envio/skip/falha com motivo)
+
+── System ──
+Settings        → /settings    (conexão IG, time, automation rules, uso)
+Diagnostics     → /diagnostics
 ```
 
 `/campaigns` continua existindo como rota legada (mesma tela) para não quebrar
@@ -216,7 +248,8 @@ Base em `.env.example`. Além dela:
 | `COMMENT_POLL_LOOKBACK_HOURS` | `72` | Janela de comentários varridos |
 | `COMMENT_POLL_MAX_PER_SWEEP` | `30` | Teto de comentários por sweep |
 | `DATA_RETENTION_WEBHOOK_DAYS` | `7` | Retenção de `WebhookEvent` |
-| `DATA_RETENTION_EVENT_DAYS` | `14` | Retenção de `OperationalEvent` INFO |
+| `DATA_RETENTION_EVENT_DAYS` | `14` | Retenção de `OperationalEvent` INFO (×6 para WARNING/ERROR) |
+| `DATA_RETENTION_COMMENT_DAYS` | `30` | Retenção de `ProcessedComment` |
 
 ---
 

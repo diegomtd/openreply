@@ -30,12 +30,15 @@ OpenReply is built around Meta's official Instagram private replies. It does not
 - Two link buttons. Send up to two tappable link buttons in one DM, each a separate tracked link with its own click stats.
 - Follow gate. Optionally require a follow before you hand over the link. The DM asks the commenter to follow and tap a button; on tap, OpenReply checks Meta's `is_user_follow_business` flag and only sends the link once they follow, re-prompting until then. It fails open (sends the link anyway) when Instagram does not return follow status, so a real follower is never trapped.
 - Personalization. Use `{username}` in your message to greet the commenter by name.
+- Send once, not forever. Every automation has a frequency: once per person (the default), once per person per post, after a cooldown, or every time. Someone who already got your message does not get it again because they wrote to you a second time. ManyChat leaves this to you to build out of tags and condition nodes; here it is a setting.
+- Opt-out that works. A DM that says just "stop" (or parar, sair, cancelar, …) mutes that person across every automation, for good. You can also mute anyone by hand.
+- Contacts. Every person who has commented or messaged, what your automations have already sent them and when, and their per-automation history.
 - Per-account rate limiting. Stays under Meta's documented cap of 750 private replies per hour, and queues the overflow instead of dropping it.
 - Multiple Instagram accounts. Connect several professional accounts under one workspace, each with its own limits.
 - Workspaces and roles. Owner, admin, and member roles with invite links, useful if you run this for clients.
 - Campaign templates. Start from a preset instead of a blank form.
 - Inbox. Read your Instagram DM conversations and reply from the dashboard, inside Meta's 24-hour messaging window. Cached so it loads instantly on repeat visits.
-- DM logs. Every send, skip, and failure is logged with a reason.
+- DM logs. Every send, skip, and failure is logged with a reason — including the deliberate ones ("already sent to this person on 3 Mar"), so a quiet automation is never a mystery.
 - Self-comment filtering. Your own comments never trigger a reply, since Meta rejects DMing yourself anyway.
 
 ## How it works
