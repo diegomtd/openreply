@@ -26,6 +26,7 @@ import {
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
+type SendFrequency = "ONCE_PER_CONTACT" | "ONCE_PER_POST" | "COOLDOWN" | "ALWAYS";
 
 interface LoadedCampaign {
   id: string;
@@ -51,6 +52,8 @@ interface LoadedCampaign {
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
+  sendFrequency: SendFrequency | null;
+  resendCooldownHours: number | null;
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
@@ -180,6 +183,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  // Once per person is the default on purpose: the alternative is re-sending the
+  // same automated message to someone who already has it.
+  const [sendFrequency, setSendFrequency] =
+    useState<SendFrequency>("ONCE_PER_CONTACT");
+  const [resendCooldownHours, setResendCooldownHours] = useState(24);
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -288,6 +296,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        setSendFrequency(c.sendFrequency ?? "ONCE_PER_CONTACT");
+        setResendCooldownHours(c.resendCooldownHours ?? 24);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -427,6 +437,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      sendFrequency,
+      resendCooldownHours,
       isActive: activeValue,
     };
 
@@ -975,6 +987,77 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 </p>
               </div>
             )}
+          </div>
+        </Section>
+
+        <Section title="But only send">
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <Radio
+              checked={sendFrequency === "ONCE_PER_CONTACT"}
+              onSelect={() => setSendFrequency("ONCE_PER_CONTACT")}
+            >
+              <span>
+                once per person
+                <span className="ml-1 text-xs text-muted">recommended</span>
+              </span>
+            </Radio>
+            <Radio
+              checked={sendFrequency === "ONCE_PER_POST"}
+              onSelect={() => setSendFrequency("ONCE_PER_POST")}
+            >
+              once per person, per post
+            </Radio>
+            <Radio
+              checked={sendFrequency === "COOLDOWN"}
+              onSelect={() => setSendFrequency("COOLDOWN")}
+            >
+              again, but not too soon
+            </Radio>
+            <Radio
+              checked={sendFrequency === "ALWAYS"}
+              onSelect={() => setSendFrequency("ALWAYS")}
+            >
+              every single time
+            </Radio>
+
+            {sendFrequency === "COOLDOWN" && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3 text-sm text-foreground">
+                <span className="text-xs text-muted">Wait at least</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8760}
+                  value={resendCooldownHours}
+                  onChange={(e) =>
+                    setResendCooldownHours(
+                      Math.max(
+                        1,
+                        Math.min(8760, Math.floor(Number(e.target.value) || 1))
+                      )
+                    )
+                  }
+                  className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                />
+                <span className="text-xs text-muted">
+                  hours before sending to the same person again
+                </span>
+              </div>
+            )}
+
+            <p className="border-t border-border pt-2 text-xs text-muted">
+              {sendFrequency === "ONCE_PER_CONTACT" &&
+                "Someone who already got this never gets it again — not on another comment, not when they DM you."}
+              {sendFrequency === "ONCE_PER_POST" &&
+                "One send per person per post. Comment on a different post and they get it again."}
+              {sendFrequency === "COOLDOWN" &&
+                `Repeat triggers inside ${resendCooldownHours}h are logged and skipped, not sent.`}
+              {sendFrequency === "ALWAYS" &&
+                "Fires on every match. Use only for something people ask for repeatedly — otherwise the same person gets the same message over and over."}
+            </p>
+            <p className="text-xs text-muted">
+              Anyone who replies &ldquo;parar&rdquo; or &ldquo;stop&rdquo; is
+              muted across every automation. Mute by hand from Contacts.
+            </p>
           </div>
         </Section>
       </div>

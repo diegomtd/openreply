@@ -34,6 +34,11 @@ const STATUS_FILTERS = [
   "SENT",
   "FAILED",
   "PENDING",
+  // The frequency skips: why an automation deliberately said nothing. Filtering
+  // to these is how you check the anti-repeat rules are doing their job.
+  "SKIPPED_ALREADY_SENT",
+  "SKIPPED_COOLDOWN",
+  "SKIPPED_OPTED_OUT",
   "SKIPPED_RATE_LIMIT",
   "SKIPPED_PLAN_LIMIT",
   "SKIPPED_DEDUP",
@@ -115,7 +120,13 @@ export default function LogsPage() {
                 }
               `}
             >
-              {status === "ALL" ? "All" : status.replace("SKIPPED_", "").replace("_", " ")}
+              {status === "ALL"
+                ? "All"
+                : status
+                    .replace("SKIPPED_", "")
+                    .replaceAll("_", " ")
+                    .toLowerCase()
+                    .replace(/^./, (c) => c.toUpperCase())}
             </button>
           ))}
         </div>
