@@ -213,6 +213,27 @@ Regras para mudanças futuras:
 
 ---
 
+## 7.1 Idioma da interface
+
+A interface do app é **pt-BR, traduzida direto no código** — sem biblioteca de
+i18n. Decisão consciente: um único negócio brasileiro usa o sistema, e uma
+camada de i18n custaria runtime e complexidade sem servir ninguém.
+
+Regras:
+
+1. Texto novo de tela nasce em pt-BR.
+2. Datas e números: `toLocaleDateString("pt-BR")` / `toLocaleString("pt-BR")`.
+   Nunca `en-US`, nunca `undefined` (o locale viraria o do navegador).
+3. As mensagens padrão que **a pessoa recebe no DM** também são pt-BR: texto de
+   botão (`Abrir link`), pedido de seguir, agradecimento. Elas vivem em
+   `lib/queue/dm-worker.ts` (fallbacks) e nos `placeholder` do construtor —
+   mudar num lugar só deixa o outro divergente.
+4. `app/layout.tsx` tem `lang="pt-BR"`.
+5. **Ainda em inglês, de propósito:** as páginas públicas de marketing/SEO
+   (`app/page.tsx`, `manychat-alternative`, `templates/*`, `comment-link-automation`,
+   `instagram-*`, páginas legais). São conteúdo de busca orgânica do projeto
+   open-source, não telas de operação.
+
 ## 8. Estrutura de menu (IA — arquitetura de informação)
 
 Ordem final, espelhando ManyChat mas enxuta:
@@ -293,4 +314,5 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-08 | Interface traduzida para pt-BR (telas do app, auth e mensagens padrão do DM). Barra lateral com ícones e grupos; Início com atalhos; cartões de automação com selos de gatilho e frequência; Registros com coluna Motivo. Confirmado que este repo é o app em `automacao.conteudos.tech` (o `/api/health` responde com a forma exata de `app/api/health/route.ts`). |
 | 2026-09-08 | Análise ManyChat + concorrentes (`docs/benchmark-manychat.md`). Correção do bug de repetição (Contact/ContactAutomationState/sendFrequency/opt-out). Tela de Contatos. Reestruturação do menu. Otimizações de CPU para a VPS. Criação deste handoff. |

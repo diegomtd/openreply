@@ -42,7 +42,7 @@ function formatCompact(n: number): string {
 }
 
 function formatDay(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("pt-BR", {
     month: "short",
     day: "numeric",
     timeZone: "UTC",
@@ -99,19 +99,19 @@ export default function FollowerChart({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-foreground">
-            Followers over time
+            Seguidores ao longo do tempo
           </h2>
           <p className="mt-1 text-sm text-muted">
             {current === null
-              ? "Follower count unavailable"
-              : `${current.toLocaleString()} now`}
+              ? "Contagem de seguidores indisponível"
+              : `${current.toLocaleString("pt-BR")} agora`}
             {net !== null && (
               <>
                 {" · "}
                 <span className={net >= 0 ? "text-success" : "text-error"}>
                   {formatSigned(net)}
                 </span>{" "}
-                over {data.length} days
+                em {data.length} dias
               </>
             )}
           </p>
@@ -122,20 +122,19 @@ export default function FollowerChart({
             onClick={() => setShowTable((v) => !v)}
             className="rounded border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
           >
-            {showTable ? "Show chart" : "Show table"}
+            {showTable ? "Ver gráfico" : "Ver tabela"}
           </button>
         )}
       </div>
 
       {data.length < 2 ? (
         <div className="mt-6 rounded border border-border bg-surface/60 p-6 text-center">
-          <p className="text-sm text-foreground">Collecting follower history</p>
+          <p className="text-sm text-foreground">Juntando o histórico de seguidores</p>
           <p className="mt-1 text-sm text-muted">
             {data.length === 0
-              ? "No snapshots recorded yet."
-              : "One day recorded so far."}{" "}
-            A point is added daily — the chart appears once there are at least
-            two.
+              ? "Nenhum registro ainda."
+              : "Só um dia registrado até agora."}{" "}
+            Um ponto é gravado por dia — o gráfico aparece a partir de dois.
           </p>
         </div>
       ) : showTable ? (
@@ -143,9 +142,9 @@ export default function FollowerChart({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-zinc-500">
-                <th className="py-2 pr-4 font-medium">Date</th>
-                <th className="py-2 px-3 font-medium text-right">Followers</th>
-                <th className="py-2 pl-3 font-medium text-right">Change</th>
+                <th className="py-2 pr-4 font-medium">Data</th>
+                <th className="py-2 px-3 font-medium text-right">Seguidores</th>
+                <th className="py-2 pl-3 font-medium text-right">Variação</th>
               </tr>
             </thead>
             <tbody>
