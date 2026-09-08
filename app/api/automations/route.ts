@@ -376,7 +376,7 @@ export async function POST(request: NextRequest) {
     linkCreates.push({
       workspaceId,
       slug: generateTrackedLinkSlug(),
-      label: secondaryButtonLabel?.trim() || "Open link",
+      label: secondaryButtonLabel?.trim() || "Abrir link",
       destinationUrl: secondaryDestinationUrl,
     });
   }
@@ -594,7 +594,7 @@ export async function PATCH(request: NextRequest) {
       orderBy: { createdAt: "asc" },
     });
     const secondaryLink = links[1];
-    const secondaryLabel = secondaryButtonLabel?.trim() || "Open link";
+    const secondaryLabel = secondaryButtonLabel?.trim() || "Abrir link";
 
     if (secondaryDestinationUrl === "") {
       if (secondaryLink) {

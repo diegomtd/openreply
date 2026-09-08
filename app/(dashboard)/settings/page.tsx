@@ -112,7 +112,7 @@ export default function SettingsPage() {
     setBusy(null);
 
     if (!payload.success) {
-      setRulesError(payload.error ?? "Could not save");
+      setRulesError(payload.error ?? "Não foi possível salvar");
       return;
     }
     setRules(payload.data);
@@ -122,7 +122,11 @@ export default function SettingsPage() {
   }
 
   async function disconnectInstagram(instagramAccountId: string) {
-    if (!confirm("Disconnect Instagram? Campaigns for this account will stop sending DMs.")) {
+    if (
+      !confirm(
+        "Desconectar o Instagram? As automações desta conta param de enviar DM."
+      )
+    ) {
       return;
     }
 
@@ -149,7 +153,7 @@ export default function SettingsPage() {
       setMembersData(payload.data);
       setInviteEmail("");
     } else {
-      setMemberError(payload.error ?? "Could not invite member");
+      setMemberError(payload.error ?? "Não foi possível convidar");
     }
     setBusy(null);
   }
@@ -184,14 +188,15 @@ export default function SettingsPage() {
       </Suspense>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Instagram Connection</h2>
+        <h2 className="text-base font-semibold mb-6">Conexão com o Instagram</h2>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3 py-3 border-b border-border">
             <div>
               <p className="text-sm font-medium text-foreground">Status</p>
               <p className="text-xs text-muted mt-0.5">
-                Comment webhooks and private replies depend on this connection.
+                Os webhooks de comentário e as respostas privadas dependem
+                desta conexão.
               </p>
             </div>
             <span
@@ -201,27 +206,30 @@ export default function SettingsPage() {
                   : "bg-warning/10 text-warning"
               }`}
             >
-              {accounts.length > 0 ? "Connected" : "Not connected"}
+              {accounts.length > 0 ? "Conectado" : "Sem conexão"}
             </span>
           </div>
 
           <div className="flex items-center justify-between gap-3 py-3 border-b border-border">
             <div>
-              <p className="text-sm font-medium text-foreground">Accounts</p>
+              <p className="text-sm font-medium text-foreground">Contas</p>
               <p className="text-xs text-muted mt-0.5">
-                {accounts.length} connected Instagram profile
-                {accounts.length === 1 ? "" : "s"}
+                {accounts.length}{" "}
+                {accounts.length === 1
+                  ? "perfil do Instagram conectado"
+                  : "perfis do Instagram conectados"}
               </p>
             </div>
             <span className="text-sm text-muted">
-              {accounts.length > 0 ? `${accounts.length} connected` : "None"}
+              {accounts.length > 0 ? `${accounts.length} conectada(s)` : "Nenhuma"}
             </span>
           </div>
 
           <div className="space-y-3 py-3">
             {accounts.length === 0 && (
               <p className="text-sm text-muted">
-                Connect an Instagram professional account to launch campaigns.
+                Conecte uma conta profissional do Instagram para criar
+                automações.
               </p>
             )}
             {accounts.map((account) => (
@@ -234,11 +242,14 @@ export default function SettingsPage() {
                     @{account.username}
                   </p>
                   <p className="mt-1 text-xs text-muted">
-                    Token expires{" "}
+                    Token expira em{" "}
                     {account.tokenExpiresAt
-                      ? new Date(account.tokenExpiresAt).toLocaleDateString()
-                      : "not available"}{" "}
-                    · {account.webhookSubscribed ? "Webhook ready" : "Webhook pending"}
+                      ? new Date(account.tokenExpiresAt).toLocaleDateString("pt-BR")
+                      : "data indisponível"}{" "}
+                    ·{" "}
+                    {account.webhookSubscribed
+                      ? "webhook ativo"
+                      : "webhook pendente"}
                   </p>
                 </div>
                 <button
@@ -247,8 +258,8 @@ export default function SettingsPage() {
                   className="inline-flex items-center justify-center rounded border border-error/20 px-4 py-2 text-sm font-medium text-error transition-all hover:border-error/40 hover:bg-error/10 disabled:opacity-50"
                 >
                   {busy === `disconnect:${account.id}`
-                    ? "Disconnecting..."
-                    : "Disconnect"}
+                    ? "Desconectando…"
+                    : "Desconectar"}
                 </button>
               </div>
             ))}
@@ -260,13 +271,13 @@ export default function SettingsPage() {
             href="/api/instagram/connect"
             className="px-4 py-2 rounded text-sm font-medium transition-colors bg-accent text-white hover:bg-accent-hover"
           >
-            {accounts.length > 0 ? "Connect another account" : "Connect Instagram"}
+            {accounts.length > 0 ? "Conectar outra conta" : "Conectar Instagram"}
           </a>
         </div>
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Team</h2>
+        <h2 className="text-base font-semibold mb-6">Time</h2>
         <div className="space-y-3">
           {membersData?.members.map((member) => (
             <div
@@ -275,7 +286,7 @@ export default function SettingsPage() {
             >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-foreground">
-                  {member.user.name ?? member.user.email ?? "Unknown member"}
+                  {member.user.name ?? member.user.email ?? "Membro sem nome"}
                 </p>
                 <p className="text-xs text-muted">{member.user.email}</p>
               </div>
@@ -289,7 +300,7 @@ export default function SettingsPage() {
         {membersData?.invitations.length ? (
           <div className="mt-6 border-t border-border pt-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Pending invites
+              Convites pendentes
             </p>
             <div className="space-y-3">
               {membersData.invitations.map((invitation) => (
@@ -313,7 +324,7 @@ export default function SettingsPage() {
                       }
                       className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
                     >
-                      Copy
+                      Copiar
                     </button>
                     <button
                       type="button"
@@ -321,7 +332,7 @@ export default function SettingsPage() {
                       disabled={busy === `invite:${invitation.id}`}
                       className="rounded-lg border border-error/20 px-3 py-1.5 text-xs font-medium text-error transition-colors hover:bg-error/10 disabled:opacity-50"
                     >
-                      Revoke
+                      Cancelar
                     </button>
                   </div>
                 </div>
@@ -339,7 +350,7 @@ export default function SettingsPage() {
               type="email"
               value={inviteEmail}
               onChange={(event) => setInviteEmail(event.target.value)}
-              placeholder="teammate@agency.com"
+              placeholder="pessoa@email.com"
               className="rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
               required
             />
@@ -350,15 +361,15 @@ export default function SettingsPage() {
               }
               className="rounded border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
             >
-              <option value="MEMBER">Member</option>
-              <option value="ADMIN">Admin</option>
+              <option value="MEMBER">Membro</option>
+              <option value="ADMIN">Administrador</option>
             </select>
             <button
               type="submit"
               disabled={busy === "invite"}
               className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
-              {busy === "invite" ? "Inviting..." : "Invite"}
+              {busy === "invite" ? "Convidando…" : "Convidar"}
             </button>
             {memberError && (
               <p className="sm:col-span-3 text-sm text-error">{memberError}</p>
@@ -368,9 +379,9 @@ export default function SettingsPage() {
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-2">Automation rules</h2>
+        <h2 className="text-base font-semibold mb-2">Regras de automação</h2>
         <p className="mb-6 text-xs text-muted">
-          These apply on top of every automation&apos;s own frequency setting.
+          Valem por cima da frequência configurada em cada automação.
         </p>
 
         <form onSubmit={saveAutomationRules} className="space-y-5">
@@ -379,7 +390,7 @@ export default function SettingsPage() {
               htmlFor="contactCooldownHours"
               className="text-sm font-medium text-foreground"
             >
-              Never message the same person twice within
+              Nunca mandar duas vezes para a mesma pessoa em menos de
             </label>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <input
@@ -391,13 +402,13 @@ export default function SettingsPage() {
                 onChange={(e) => setCooldownDraft(e.target.value)}
                 className="w-24 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground focus:border-accent/40 focus:outline-none"
               />
-              <span className="text-xs text-muted">hours</span>
+              <span className="text-xs text-muted">horas</span>
             </div>
             <p className="mt-1.5 text-xs text-muted">
-              A ceiling across all automations, so several matching campaigns
-              cannot each send. 0 turns it off and leaves frequency to each
-              automation. Does not apply when someone taps a button — that is
-              them asking.
+              Um teto que vale para todas as automações somadas, então várias
+              campanhas que dão match não enviam cada uma a sua. 0 desliga e
+              deixa a frequência por conta de cada automação. Não vale quando a
+              pessoa toca num botão — ali ela está pedindo.
             </p>
           </div>
 
@@ -406,19 +417,20 @@ export default function SettingsPage() {
               htmlFor="optOutKeywords"
               className="text-sm font-medium text-foreground"
             >
-              Extra opt-out words
+              Palavras extras de descadastro
             </label>
             <input
               id="optOutKeywords"
               value={optOutDraft}
               onChange={(e) => setOptOutDraft(e.target.value)}
-              placeholder="me tira, nao quero mais"
+              placeholder="me tira, não quero mais"
               className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
             />
             <p className="mt-1.5 text-xs text-muted">
-              Comma separated. A DM that is only one of these words mutes that
-              person across every automation. Already built in: parar, pare,
-              sair, stop, cancelar, descadastrar, unsubscribe, chega.
+              Separadas por vírgula. Um DM que seja só uma dessas palavras
+              silencia a pessoa em todas as automações. Já vêm de fábrica: parar,
+              pare, para, sair, stop, cancelar, cancela, descadastrar,
+              desinscrever, remover, unsubscribe, chega.
             </p>
           </div>
 
@@ -430,22 +442,22 @@ export default function SettingsPage() {
               disabled={busy === "rules" || !rules}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
             >
-              {busy === "rules" ? "Saving…" : "Save rules"}
+              {busy === "rules" ? "Salvando…" : "Salvar regras"}
             </button>
-            {rulesSaved && <span className="text-xs text-success">Saved</span>}
+            {rulesSaved && <span className="text-xs text-success">Salvo</span>}
           </div>
         </form>
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Usage</h2>
+        <h2 className="text-base font-semibold mb-6">Uso</h2>
         <div className="flex items-center justify-between gap-3 py-3">
           <div>
             <p className="text-sm font-medium text-foreground">
-              DMs sent this month
+              DMs enviados neste mês
             </p>
             <p className="text-xs text-muted mt-0.5">
-              Self-hosted — no plan limits.
+              No seu próprio servidor — sem limite de plano.
             </p>
           </div>
           <span className="text-sm font-semibold text-foreground">

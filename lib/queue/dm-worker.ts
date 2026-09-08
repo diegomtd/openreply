@@ -97,7 +97,7 @@ function buildLinkButtons(
 ): { title: string; url: string }[] {
   return trackedLinks.slice(0, 3).map((link, index) => ({
     url: buildTrackedUrl(link.slug),
-    title: (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
+    title: (index === 0 ? primaryLabel : link.label) || link.label || "Abrir link",
   }));
 }
 
@@ -157,7 +157,7 @@ async function sendRevealDirectMessage(
     renderMessageWithoutLink({
       message: automation.dmMessage,
       commenterName,
-    }) || "Here's your link:";
+    }) || "Aqui está seu link:";
   const buttons = buildLinkButtons(
     automation.trackedLinks,
     automation.linkButtonLabel
@@ -614,7 +614,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         const promptText = renderMessageWithoutLink({
           message:
             automation.followPromptMessage ||
-            "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+            "antes de eu te mandar o link, um favor: me segue aqui. é de graça, não ganho nada com isso. toca no botão quando estiver me seguindo e eu te envio na hora",
           commenterName,
         });
         await sendPrivateReplyWithButton(
@@ -622,7 +622,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           automation.instagramAccount.instagramId,
           commentId,
           promptText,
-          automation.followPromptButtonLabel || "i'm following",
+          automation.followPromptButtonLabel || "estou te seguindo",
           `followcheck:${automation.id}`
         );
       } else if (automation.trackedLinks.length > 0) {
@@ -631,7 +631,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           renderMessageWithoutLink({
             message: automation.dmMessage,
             commenterName,
-          }) || "Here's your link:";
+          }) || "Aqui está seu link:";
         const buttons = buildLinkButtons(
           automation.trackedLinks,
           automation.linkButtonLabel
@@ -833,7 +833,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       const promptText = renderMessageWithoutLink({
         message:
           automation.followPromptMessage ||
-          "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+          "antes de eu te mandar o link, um favor: me segue aqui. é de graça, não ganho nada com isso. toca no botão quando estiver me seguindo e eu te envio na hora",
         commenterName,
       });
       try {
@@ -842,7 +842,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
           automation.instagramAccount.instagramId,
           userId,
           promptText,
-          automation.followPromptButtonLabel || "i'm following",
+          automation.followPromptButtonLabel || "estou te seguindo",
           `followcheck:${automation.id}`
         );
       } catch (error) {
@@ -1234,7 +1234,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         const promptText = renderMessageWithoutLink({
           message:
             automation.followPromptMessage ||
-            "Almost there! Follow me and tap the button below to grab your link 💛",
+            "Falta pouco! Me segue e toca no botão abaixo para pegar seu link 💛",
           commenterName,
         });
         await sendDirectMessageWithButton(
@@ -1242,7 +1242,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           automation.instagramAccount.instagramId,
           senderId,
           promptText,
-          automation.followPromptButtonLabel || "I'm following ✅",
+          automation.followPromptButtonLabel || "Estou te seguindo ✅",
           `followcheck:${automation.id}`
         );
       } else {
