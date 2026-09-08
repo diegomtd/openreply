@@ -176,7 +176,7 @@ export async function GET(request: NextRequest) {
     dayStart.setDate(dayStart.getDate() - i);
 
     dailyDMs.push({
-      date: dayStart.toLocaleDateString("en-US", { weekday: "short" }),
+      date: dayStart.toLocaleDateString("pt-BR", { weekday: "short" }),
       count: sentPerDay.get(dayStart.getTime()) ?? 0,
     });
   }

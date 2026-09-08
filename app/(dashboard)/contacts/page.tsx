@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Contacts Page
+ * Contatos
  *
- * The people side of the app: who has interacted, what each of them has already
- * received, and a mute switch. This is the screen that answers "why did she get
- * that message five times?" — and the one that stops it.
+ * O lado das pessoas: quem interagiu, o que cada uma já recebeu e um botão de
+ * silenciar. É a tela que responde "por que ela recebeu essa mensagem cinco
+ * vezes?" — e a que faz isso parar.
  */
 
 import { Fragment, useCallback, useEffect, useState } from "react";
@@ -40,15 +40,15 @@ interface Pagination {
 }
 
 const FILTERS: { value: string; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "messaged", label: "Already messaged" },
-  { value: "never_messaged", label: "Never messaged" },
-  { value: "muted", label: "Muted" },
+  { value: "all", label: "Todos" },
+  { value: "messaged", label: "Já receberam" },
+  { value: "never_messaged", label: "Nunca receberam" },
+  { value: "muted", label: "Silenciados" },
 ];
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString("en-US", {
+  return new Date(value).toLocaleString("pt-BR", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -103,7 +103,7 @@ export default function ContactsPage() {
       .catch(console.error);
   }, []);
 
-  // One request per pause in typing, not one per keystroke.
+  // Uma requisição por pausa na digitação, não uma por tecla.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedSearch(search.trim());
@@ -112,8 +112,8 @@ export default function ContactsPage() {
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  // Deferred a tick, the same way the logs page does it: fetching straight from
-  // the effect body sets state synchronously and cascades a render.
+  // Adiado um tick, igual à tela de Registros: buscar direto no corpo do efeito
+  // muda estado de forma síncrona e cascateia renderização.
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void fetchContacts();
@@ -139,7 +139,7 @@ export default function ContactsPage() {
                   optedOut: !contact.optedOut,
                   optedOutReason: contact.optedOut
                     ? null
-                    : "Muted from the Contacts screen",
+                    : "Silenciado na tela de Contatos",
                 }
               : c
           )
@@ -155,9 +155,9 @@ export default function ContactsPage() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted">
-        Everyone who has commented on or messaged your posts, and what your
-        automations have already sent them. Mute someone to stop every automation
-        for them without touching your campaigns.
+        Todo mundo que comentou nos seus posts ou te mandou DM, e o que suas
+        automações já enviaram para cada um. Silenciar uma pessoa para todas as
+        automações não mexe em nenhuma campanha.
       </p>
 
       {/* Filters */}
@@ -185,7 +185,7 @@ export default function ContactsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search username or id"
+            placeholder="Buscar por @ ou id"
             className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none sm:w-56"
           />
           {accounts.length > 1 && (
@@ -208,22 +208,22 @@ export default function ContactsPage() {
             <thead>
               <tr className="border-b border-border text-left">
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Contact
+                  Contato
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Account
+                  Conta
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Automations sent
+                  Envios recebidos
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Last automated DM
+                  Último DM automático
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Last message in
+                  Última mensagem dela
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
-                  Automations
+                  Ações
                 </th>
               </tr>
             </thead>
@@ -244,8 +244,8 @@ export default function ContactsPage() {
                     className="px-4 py-12 text-center text-muted sm:px-6"
                   >
                     {debouncedSearch || filter !== "all"
-                      ? "No contacts match this filter"
-                      : "No contacts yet. They appear here the first time someone comments on a post an automation watches, or sends you a DM."}
+                      ? "Nenhum contato com esse filtro"
+                      : "Nenhum contato ainda. Eles aparecem aqui na primeira vez que alguém comenta num post que uma automação vigia, ou te manda um DM."}
                   </td>
                 </tr>
               )}
@@ -259,7 +259,9 @@ export default function ContactsPage() {
                           @{contact.username ?? contact.igsid.slice(0, 10)}
                         </span>
                         {contact.optedOut && (
-                          <span className="ml-2 text-xs text-warning">muted</span>
+                          <span className="ml-2 text-xs text-warning">
+                            silenciado
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-4 text-muted sm:px-6">
@@ -284,14 +286,14 @@ export default function ContactsPage() {
                             }
                             className="text-xs text-muted hover:text-foreground"
                           >
-                            {expanded === contact.id ? "Hide" : "History"}
+                            {expanded === contact.id ? "Fechar" : "Histórico"}
                           </button>
                           <button
                             onClick={() => void toggleMute(contact)}
                             disabled={pendingMute === contact.id}
                             className="text-xs text-muted hover:text-foreground disabled:opacity-40"
                           >
-                            {contact.optedOut ? "Unmute" : "Mute"}
+                            {contact.optedOut ? "Reativar" : "Silenciar"}
                           </button>
                         </div>
                       </td>
@@ -302,17 +304,17 @@ export default function ContactsPage() {
                         <td colSpan={6} className="px-4 py-4 sm:px-6">
                           {contact.optedOut && (
                             <p className="mb-3 text-xs text-warning">
-                              Muted —{" "}
+                              Silenciado —{" "}
                               {contact.optedOutReason ??
-                                "no automation will send to this contact"}
+                                "nenhuma automação envia para este contato"}
                             </p>
                           )}
                           <p className="mb-2 text-xs uppercase tracking-wider text-muted">
-                            First seen {formatDate(contact.firstSeenAt)}
+                            Visto pela primeira vez em {formatDate(contact.firstSeenAt)}
                           </p>
                           {contact.automationStates.length === 0 ? (
                             <p className="text-sm text-muted">
-                              No automation has sent to this contact yet.
+                              Nenhuma automação enviou para este contato ainda.
                             </p>
                           ) : (
                             <ul className="space-y-1 text-sm">
@@ -325,7 +327,7 @@ export default function ContactsPage() {
                                     {state.automation.name}
                                   </span>
                                   <span className="text-xs text-muted">
-                                    {state.sentCount}×, last{" "}
+                                    {state.sentCount}×, último em{" "}
                                     {formatDate(state.lastSentAt)}
                                   </span>
                                 </li>
@@ -344,8 +346,8 @@ export default function ContactsPage() {
         {pagination && pagination.totalPages > 1 && (
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-4 sm:px-6">
             <p className="text-xs text-muted">
-              Showing {(pagination.page - 1) * pagination.limit + 1}–
-              {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
+              Mostrando {(pagination.page - 1) * pagination.limit + 1}–
+              {Math.min(pagination.page * pagination.limit, pagination.total)} de{" "}
               {pagination.total}
             </p>
             <div className="flex items-center gap-2">
@@ -357,7 +359,7 @@ export default function ContactsPage() {
                 }}
                 className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-all hover:border-border-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
               >
-                Previous
+                Anterior
               </button>
               <span className="px-2 text-xs text-muted">
                 {page} / {pagination.totalPages}
@@ -370,7 +372,7 @@ export default function ContactsPage() {
                 }}
                 className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-all hover:border-border-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
               >
-                Next
+                Próxima
               </button>
             </div>
           </div>
