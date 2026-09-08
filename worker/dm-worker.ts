@@ -7,9 +7,11 @@ const worker = createDMWorker();
 const startedAt = new Date().toISOString();
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // Polling safety net for comments that webhooks miss. Runs in the worker because
-// it must fire every few minutes and Vercel's free crons only run once a day.
+// the host's crons are too coarse for it. Fifteen minutes by default: the webhook
+// catches the common case within seconds, so sweeping more often mostly spends
+// CPU and Instagram's comment-API budget (error 368) to find nothing.
 const POLL_INTERVAL_MS = Number(
-  process.env.COMMENT_POLL_INTERVAL_MS ?? 5 * 60_000
+  process.env.COMMENT_POLL_INTERVAL_MS ?? 15 * 60_000
 );
 
 console.log("[DM Worker] Started");

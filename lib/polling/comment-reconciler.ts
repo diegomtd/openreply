@@ -85,6 +85,10 @@ export async function reconcileComments(): Promise<void> {
     },
   });
 
+  // Nothing active: no Graph API calls, no operational rows, no work. Worth an
+  // explicit exit because this runs on a timer forever, on a small VPS.
+  if (automations.length === 0) return;
+
   const sinceMs = Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000;
   const tokenCache = new Map<string, string | null>();
 

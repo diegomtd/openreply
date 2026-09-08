@@ -67,8 +67,39 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const commentEvents = parseCommentEvents(
+    payload as Parameters<typeof parseCommentEvents>[0]
+  );
+  const postbackEvents = parsePostbackEvents(
+    payload as Parameters<typeof parsePostbackEvents>[0]
+  );
+  const messageEvents = parseMessageEvents(
+    payload as Parameters<typeof parseMessageEvents>[0]
+  );
+  const readEvents = parseReadEvents(
+    payload as Parameters<typeof parseReadEvents>[0]
+  );
+
+  // Every event in one delivery belongs to the same connected account, so the
+  // workspace is resolved once here rather than per event. The event row is then
+  // written once with its workspace already set — this used to be an insert
+  // followed by an UPDATE for each event in the payload.
+  const accountId =
+    commentEvents[0]?.instagramAccountId ??
+    messageEvents[0]?.instagramAccountId ??
+    postbackEvents[0]?.instagramAccountId ??
+    readEvents[0]?.instagramAccountId ??
+    null;
+  const account = accountId
+    ? await prisma.instagramAccount.findUnique({
+        where: { instagramId: accountId },
+        select: { workspaceId: true },
+      })
+    : null;
+
   const webhookEvent = await prisma.webhookEvent.create({
     data: {
+      workspaceId: account?.workspaceId ?? null,
       object:
         typeof payload === "object" && payload && "object" in payload
           ? String(payload.object)
@@ -79,17 +110,9 @@ export async function POST(request: NextRequest) {
   });
 
   try {
-    const commentEvents = parseCommentEvents(
-      payload as Parameters<typeof parseCommentEvents>[0]
-    );
     const queue = getDMQueue();
 
     for (const event of commentEvents) {
-      const account = await prisma.instagramAccount.findUnique({
-        where: { instagramId: event.instagramAccountId },
-        select: { workspaceId: true },
-      });
-
       await queue.add(
         "process-comment",
         {
@@ -105,20 +128,9 @@ export async function POST(request: NextRequest) {
           jobId: `comment_${event.instagramAccountId}_${event.commentId}`,
         }
       );
-
-      if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
-      }
     }
 
     // Button taps from opening DMs → deliver the reveal message.
-    const postbackEvents = parsePostbackEvents(
-      payload as Parameters<typeof parsePostbackEvents>[0]
-    );
-
     for (const event of postbackEvents) {
       await queue.add(
         POSTBACK_JOB_NAME,
@@ -139,16 +151,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Inbound DMs → keyword-triggered autoreply.
-    const messageEvents = parseMessageEvents(
-      payload as Parameters<typeof parseMessageEvents>[0]
-    );
-
     for (const event of messageEvents) {
-      const account = await prisma.instagramAccount.findUnique({
-        where: { instagramId: event.instagramAccountId },
-        select: { workspaceId: true },
-      });
-
       await queue.add(
         MESSAGE_JOB_NAME,
         {
@@ -167,22 +170,11 @@ export async function POST(request: NextRequest) {
           ).toString("base64url")}`,
         }
       );
-
-      if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
-      }
     }
 
     // If a user reads the opening DM and never taps the button, deliver the
     // same next-step DM after five minutes. The worker no-ops this delayed job
     // if a real button tap has already delivered the reveal.
-    const readEvents = parseReadEvents(
-      payload as Parameters<typeof parseReadEvents>[0]
-    );
-
     for (const event of readEvents) {
       const openingLogs = await prisma.dmLog.findMany({
         where: {

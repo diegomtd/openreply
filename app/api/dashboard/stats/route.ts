@@ -49,7 +49,8 @@ export async function GET(request: NextRequest) {
     topKeywordRows,
     recentLogs,
     user,
-    contactRows,
+    contactsCount,
+    weekSentRows,
   ] = await Promise.all([
     prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -141,33 +142,42 @@ export async function GET(request: NextRequest) {
           select: { name: true, email: true },
         })
       : Promise.resolve(null),
-    // Distinct people who have interacted, counted as "contacts".
+    // Contacts are a table now, so this is a count instead of loading every
+    // distinct commenter id in the workspace into memory to measure its length.
+    prisma.contact.count({ where: { workspaceId, ...accountFilter } }),
+    // One pass over the week's sends, bucketed below. This used to be seven
+    // sequential COUNT queries — the most expensive thing on the dashboard.
     prisma.dmLog.findMany({
-      where: { workspaceId, ...accountFilter },
-      distinct: ["commenterId"],
-      select: { commenterId: true },
+      where: {
+        workspaceId,
+        status: "SENT",
+        createdAt: { gte: weekStart },
+        ...accountFilter,
+      },
+      select: { createdAt: true },
     }),
   ]);
+
+  // Bucket the week's sends by local day. Keyed on the day's timestamp so two
+  // different weeks never collide on the same weekday label.
+  const sentPerDay = new Map<number, number>();
+  for (const row of weekSentRows) {
+    const day = new Date(
+      row.createdAt.getFullYear(),
+      row.createdAt.getMonth(),
+      row.createdAt.getDate()
+    ).getTime();
+    sentPerDay.set(day, (sentPerDay.get(day) ?? 0) + 1);
+  }
 
   const dailyDMs: { date: string; count: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const dayStart = new Date(todayStart);
     dayStart.setDate(dayStart.getDate() - i);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-
-    const count = await prisma.dmLog.count({
-      where: {
-        workspaceId,
-        status: "SENT",
-        createdAt: { gte: dayStart, lt: dayEnd },
-        ...accountFilter,
-      },
-    });
 
     dailyDMs.push({
       date: dayStart.toLocaleDateString("en-US", { weekday: "short" }),
-      count,
+      count: sentPerDay.get(dayStart.getTime()) ?? 0,
     });
   }
 
@@ -193,7 +203,7 @@ export async function GET(request: NextRequest) {
     success: true,
     data: {
       userName: firstName,
-      contactsCount: contactRows.length,
+      contactsCount,
       workspace,
       instagramAccount,
       instagramAccounts,
