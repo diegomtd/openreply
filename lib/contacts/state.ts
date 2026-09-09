@@ -109,7 +109,7 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
     return {
       allowed: false,
       status: "SKIPPED_OPTED_OUT",
-      reason: "Contact opted out of automated messages",
+      reason: "A pessoa pediu para parar de receber mensagens automáticas",
     };
   }
 
@@ -124,8 +124,8 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
     return {
       allowed: false,
       status: "SKIPPED_TAG_RULE",
-      reason: `Contact is missing the required tag${
-        missing.length > 1 ? "s" : ""
+      reason: `A pessoa não tem ${
+        missing.length > 1 ? "as tags exigidas" : "a tag exigida"
       }: ${missing.join(", ")}`,
     };
   }
@@ -137,7 +137,9 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
     return {
       allowed: false,
       status: "SKIPPED_TAG_RULE",
-      reason: `Contact carries an excluded tag: ${blocking.join(", ")}`,
+      reason: `A pessoa tem uma tag que bloqueia o envio: ${blocking.join(
+        ", "
+      )}`,
     };
   }
 
@@ -154,9 +156,9 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
         return {
           allowed: false,
           status: "SKIPPED_ALREADY_SENT",
-          reason: `Already sent to this contact on ${formatWhen(
+          reason: `Já enviada para esta pessoa em ${formatWhen(
             previous.lastSentAt
-          )} (set to send once per person)`,
+          )} (configurada para enviar uma vez por pessoa)`,
         };
       }
       break;
@@ -167,7 +169,7 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
         return {
           allowed: false,
           status: "SKIPPED_ALREADY_SENT",
-          reason: `Already sent to this contact for this post on ${formatWhen(
+          reason: `Já enviada para esta pessoa neste post em ${formatWhen(
             previous.lastSentAt
           )}`,
         };
@@ -185,9 +187,9 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
         return {
           allowed: false,
           status: "SKIPPED_COOLDOWN",
-          reason: `Sent ${formatWhen(
+          reason: `Enviada em ${formatWhen(
             last
-          )}; this automation waits ${cooldown}h between sends to the same person`,
+          )}; esta automação espera ${cooldown}h entre envios para a mesma pessoa`,
         };
       }
       break;
@@ -207,9 +209,9 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
     return {
       allowed: false,
       status: "SKIPPED_COOLDOWN",
-      reason: `Another automation already messaged this contact on ${formatWhen(
+      reason: `Outra automação já falou com esta pessoa em ${formatWhen(
         input.lastAutomationSentAt
-      )} (workspace limit: 1 automated DM per ${globalCooldown}h)`,
+      )} (limite da conta: 1 DM automático a cada ${globalCooldown}h)`,
     };
   }
 

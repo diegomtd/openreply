@@ -5,7 +5,8 @@
 -- ManyChat, mas como configuração em vez de flow.
 
 -- AlterEnum
-ALTER TYPE "DmStatus" ADD VALUE 'SKIPPED_TAG_RULE';
+-- IF NOT EXISTS: ver a nota na migration de frequencia.
+ALTER TYPE "DmStatus" ADD VALUE IF NOT EXISTS 'SKIPPED_TAG_RULE';
 
 -- AlterTable
 ALTER TABLE "Automation"

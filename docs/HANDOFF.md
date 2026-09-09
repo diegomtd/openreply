@@ -428,6 +428,58 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 ---
 
+## 10.1 Validação das migrations antes do deploy (2026-09-09)
+
+O CI do GitHub nunca rodou neste repositório (Actions desabilitado no fork), e o
+deploy foi feito **sem backup do banco**. Então a validação foi feita contra um
+Postgres 16 de verdade, não só com testes de mock:
+
+1. **Do zero:** as 23 migrations aplicam limpo num banco novo.
+2. **Simulando produção:** aplicadas só as 18 migrations que já estavam em
+   produção, populado com dados realistas (uma pessoa que recebeu a mesma
+   automação 3 vezes — o bug —, uma com envio só falho, uma sem `dmSentAt`,
+   automação com follow-up, automação com follow-up em branco), e então
+   aplicadas as 5 novas.
+3. **Rodando o código real contra esse banco migrado** (`canSendAutomation`),
+   não os mocks:
+
+   | Pessoa | Histórico | Decisão |
+   |---|---|---|
+   | Maria | 3 envios da automação A | **bloqueia** |
+   | Maria | 1 envio da automação B | **bloqueia** |
+   | João | 1 envio | **bloqueia** |
+   | Ana | só `FAILED` (nunca recebeu de fato) | envia |
+   | pessoa nova | nenhum | envia |
+
+Isto é a prova de que o backfill fecha o bug no deploy, e não um envio depois.
+
+### Endurecimento feito por causa da ausência de backup
+
+O container web roda `npm run db:migrate && npm start`: se uma migration falha,
+**o app não sobe**. Duas construções minhas não tinham precedente em nenhuma
+migration já aplicada neste banco, e foram trocadas:
+
+- `gen_random_uuid()` → `'bf' || md5(<chaves naturais do grupo>)`. A função só é
+  nativa no Postgres 13+; antes disso exige a extensão `pgcrypto`. `md5` é
+  builtin em toda versão. Como a chave é a mesma do `GROUP BY`, o id é único por
+  construção e reexecutar gera os mesmos ids.
+- `ALTER TYPE ... ADD VALUE` → `ADD VALUE IF NOT EXISTS`. Sem isso, uma segunda
+  tentativa do mesmo deploy morre em "value already exists" e deixa o banco
+  travado num estado que só sai com `prisma migrate resolve` na mão.
+
+Nenhuma das 5 migrations tem `DROP`, `DELETE` ou alteração destrutiva: são todas
+aditivas, e os dois backfills usam `ON CONFLICT DO NOTHING`.
+
+### Como repetir esta validação
+
+```sh
+/usr/lib/postgresql/16/bin/initdb -D <dir> -U postgres --auth=trust
+/usr/lib/postgresql/16/bin/pg_ctl -D <dir> -o '-p 55432 -k /tmp' start
+DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma migrate deploy
+```
+
+---
+
 ## 11. Backlog priorizado (o que ficou fora)
 
 | Prioridade | Item | Nota |
@@ -449,6 +501,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |
 | 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |
 | 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |
 | 2026-09-09 | Sequência de mensagens (`AutomationStep`): até 3 passos depois do link, cadeia que anda um passo por vez, para em opt-out e em falha de envio, com validação da janela de 24h no acumulado. Substituiu o trio `followUp*`, que ficou como legado só de leitura. |

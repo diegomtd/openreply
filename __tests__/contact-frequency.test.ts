@@ -62,7 +62,7 @@ describe("decideAutomationSend", () => {
     });
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) {
-      expect(decision.reason).toContain("Already sent to this contact");
+      expect(decision.reason).toContain("Já enviada para esta pessoa");
     }
   });
 
@@ -139,7 +139,7 @@ describe("decideAutomationSend", () => {
         status: "SKIPPED_TAG_RULE",
       });
       if (!decision.allowed) {
-        expect(decision.reason).toContain("excluded tag");
+        expect(decision.reason).toContain("tag que bloqueia o envio");
       }
     });
 
@@ -276,7 +276,7 @@ describe("decideAutomationSend", () => {
         status: "SKIPPED_COOLDOWN",
       });
       if (!decision.allowed) {
-        expect(decision.reason).toContain("Another automation");
+        expect(decision.reason).toContain("Outra automação já falou");
       }
     });
 

@@ -1415,7 +1415,7 @@ describe("DM Worker — DM keyword trigger", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           status: "SKIPPED_ALREADY_SENT",
-          errorMessage: expect.stringContaining("Already sent to this contact"),
+          errorMessage: expect.stringContaining("Já enviada para esta pessoa"),
         }),
       })
     );
@@ -1575,7 +1575,7 @@ describe("DM Worker — DM keyword trigger", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           status: "SKIPPED_COOLDOWN",
-          errorMessage: expect.stringContaining("Another automation"),
+          errorMessage: expect.stringContaining("Outra automação já falou"),
         }),
       })
     );

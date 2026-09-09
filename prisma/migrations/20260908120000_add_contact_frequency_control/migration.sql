@@ -8,9 +8,12 @@
 CREATE TYPE "SendFrequency" AS ENUM ('ONCE_PER_CONTACT', 'ONCE_PER_POST', 'COOLDOWN', 'ALWAYS');
 
 -- AlterEnum
-ALTER TYPE "DmStatus" ADD VALUE 'SKIPPED_ALREADY_SENT';
-ALTER TYPE "DmStatus" ADD VALUE 'SKIPPED_COOLDOWN';
-ALTER TYPE "DmStatus" ADD VALUE 'SKIPPED_OPTED_OUT';
+-- IF NOT EXISTS para o deploy poder ser repetido: sem ele, uma segunda
+-- tentativa da mesma migration morre em "value already exists" e deixa o
+-- banco travado num estado que so sai com `prisma migrate resolve` na mao.
+ALTER TYPE "DmStatus" ADD VALUE IF NOT EXISTS 'SKIPPED_ALREADY_SENT';
+ALTER TYPE "DmStatus" ADD VALUE IF NOT EXISTS 'SKIPPED_COOLDOWN';
+ALTER TYPE "DmStatus" ADD VALUE IF NOT EXISTS 'SKIPPED_OPTED_OUT';
 
 -- AlterTable
 ALTER TABLE "Workspace"
@@ -86,6 +89,12 @@ ALTER TABLE "ContactAutomationState" ADD CONSTRAINT "ContactAutomationState_auto
 
 -- Backfill from the existing send history.
 --
+-- Ids sao md5 das chaves naturais do grupo, nao gen_random_uuid(): essa
+-- funcao so e nativa a partir do Postgres 13 (antes disso exige a extensao
+-- pgcrypto), e este arquivo roda antes do app subir. md5 e builtin em toda
+-- versao. Como a chave e a mesma do GROUP BY, o id e unico por construcao e
+-- reexecutar a migration gera exatamente os mesmos ids.
+--
 -- Without this, everyone who already received an automation would receive it one
 -- more time after deploy (the new guard would only see them on the send after).
 -- The backfill is what makes "people I already talked to stop getting the
@@ -96,7 +105,7 @@ INSERT INTO "Contact" (
     "createdAt", "updatedAt"
 )
 SELECT
-    gen_random_uuid()::text,
+    'bf' || md5(l."instagramAccountId" || '|' || l."commenterId"),
     MIN(l."workspaceId"),
     l."instagramAccountId",
     l."commenterId",
@@ -119,7 +128,7 @@ INSERT INTO "ContactAutomationState" (
     "sentCount", "firstSentAt", "lastSentAt"
 )
 SELECT
-    gen_random_uuid()::text,
+    'bf' || md5(c."id" || '|' || l."automationId" || '|legacy'),
     c."id",
     l."automationId",
     'legacy',

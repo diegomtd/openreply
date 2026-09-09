@@ -23,6 +23,10 @@ CREATE INDEX "AutomationStep_automationId_idx" ON "AutomationStep"("automationId
 -- AddForeignKey
 ALTER TABLE "AutomationStep" ADD CONSTRAINT "AutomationStep_automationId_fkey" FOREIGN KEY ("automationId") REFERENCES "Automation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- Id derivado da automacao (md5), e nao gen_random_uuid(), que exige
+-- Postgres 13+ ou a extensao pgcrypto. Um passo por automacao, entao a
+-- chave e unica.
+--
 -- Converte o follow-up existente no passo 1, para nenhuma automação em produção
 -- perder a mensagem que já enviava. As colunas antigas ficam onde estão: o
 -- worker para de lê-las, mas um rollback continua possível sem perder dado.
@@ -31,7 +35,7 @@ INSERT INTO "AutomationStep" (
     "createdAt", "updatedAt"
 )
 SELECT
-    gen_random_uuid()::text,
+    'bf' || md5(a."id" || '|step1'),
     a."id",
     1,
     a."followUpMessage",
