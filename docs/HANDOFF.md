@@ -308,6 +308,7 @@ lido como "ninguém abriu".
 | D4 | Fail-closed no follow gate no primeiro contato, fail-open depois do toque | Já era a regra do código; mantida. |
 | D5 | Sem flow builder visual (canvas) | Custo/benefício ruim para 1 negócio; o ganho real está em gatilhos + anti-repetição + inbox. Ver `docs/benchmark-manychat.md` §6. |
 | D6 | Polling reconciler continua, mas com intervalo maior por padrão | CPU fraca; webhook cobre o caso comum. |
+| D7 | **Sem broadcast.** | A API do Instagram só permite enviar dentro de 24h da última mensagem da pessoa. Uma tela de "enviar para a base" entregaria falhas `outside of allowed window` e risco de restrição na conta — e seria o oposto do trabalho anti-repetição. Ver `benchmark-manychat.md` §6.1. |
 
 ---
 
@@ -435,7 +436,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 | ~~P2~~ | ~~Tags como condição~~ | **Feito** em 2026-09-09. Ver §5.3. |
 | ~~P2~~ | ~~Funil enviado → lido → clicado~~ | **Feito** em 2026-09-09. Ver §5.4. |
 | ~~P1~~ | ~~Sequência de 2–3 mensagens dentro da janela de 24h~~ | **Feito** em 2026-09-09. Ver §5.2. |
-| P1 | Broadcast (disparo para a base) | Precisa respeitar as tags de marketing da Meta |
+| ❌ | ~~Broadcast (disparo para a base)~~ | **Descartado.** O Instagram só permite enviar dentro de 24h da última mensagem da pessoa; fora disso só a tag `HUMAN_AGENT`, que exige humano respondendo. Não existe tag de marketing como no Messenger. Ver `docs/benchmark-manychat.md` §6.1. |
 | ~~P2~~ | ~~Tags usadas em condição de automação~~ | **Feito** em 2026-09-09. Ver §5.3. |
 | P2 | Campos personalizados (além de tag) | Só se tag não bastar |
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |

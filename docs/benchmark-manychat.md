@@ -219,6 +219,42 @@ gerou este trabalho.
 
 ---
 
+## 6.1 Broadcast — por que NÃO foi construído
+
+Estava no backlog como P1 e foi descartado depois de olhar a regra da
+plataforma, não por falta de tempo.
+
+**A API de mensagens do Instagram só permite enviar dentro de 24h** contados da
+última mensagem da pessoa. Fora disso existe apenas a tag `HUMAN_AGENT` (7 dias),
+que **exige um humano respondendo** — usá-la para disparo automatizado é violação
+de política, não brecha. E o Instagram **não tem** o equivalente das *recurring
+notifications* / message tags de marketing do Messenger.
+
+Consequências práticas:
+
+1. Um "disparo para a base" no Instagram é, na melhor das hipóteses, um disparo
+   para quem falou com você nas últimas 24h. Isso é uma fatia pequena e que muda
+   de hora em hora — não é uma base.
+2. Construir uma tela que promete "enviar para todos" entregaria, na prática,
+   uma pilha de falhas `outside of allowed window` e um risco real de restrição
+   na conta.
+3. É especialmente ruim **neste** sistema, que acabou de ser consertado por
+   mandar mensagem demais. Uma ferramenta de envio em massa é o oposto do
+   trabalho que este PR fez.
+
+**O que serve o mesmo propósito, dentro da regra e já construído:**
+
+- **Sequência de mensagens** (§5.2 do handoff): 2–3 mensagens depois do link,
+  dentro da janela, que é onde a conversa realmente acontece.
+- **Condição por tag** (§5.3): segmentar quem recebe o quê sem disparar para
+  todos.
+- **Gatilho de story** (§5.1): alcança quem responde ou menciona, que é o volume
+  de contato que o Instagram de fato favorece hoje.
+
+Se algum dia a Meta abrir uma tag de marketing para Instagram, o lugar de
+implementar é uma automação com gatilho manual, reusando `AutomationStep` e a
+`canSendAutomation` — a estrutura já suporta.
+
 ## 7. Roteiro depois deste trabalho
 
 | Prioridade | Item | Por que |
