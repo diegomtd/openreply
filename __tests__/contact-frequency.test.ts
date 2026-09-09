@@ -12,6 +12,9 @@ function input(overrides: Partial<FrequencyInput> = {}): FrequencyInput {
   return {
     now: NOW,
     optedOut: false,
+    contactTags: [],
+    requiredTags: [],
+    excludedTags: [],
     sendFrequency: "ONCE_PER_CONTACT",
     resendCooldownHours: 24,
     workspaceCooldownHours: 0,
@@ -87,6 +90,101 @@ describe("decideAutomationSend", () => {
 
     if (decision.allowed) throw new Error("expected a block");
     expect(decision.reason).toContain("2026-09-08 10:00");
+  });
+
+  describe("condição de tag", () => {
+    it("blocks a contact missing a required tag", () => {
+      const decision = decideAutomationSend(
+        input({ contactTags: ["lead"], requiredTags: ["cliente"] })
+      );
+
+      expect(decision).toMatchObject({
+        allowed: false,
+        status: "SKIPPED_TAG_RULE",
+      });
+      if (!decision.allowed) {
+        expect(decision.reason).toContain("cliente");
+      }
+    });
+
+    it("requires ALL of them, not just one", () => {
+      expect(
+        decideAutomationSend(
+          input({
+            contactTags: ["lead"],
+            requiredTags: ["lead", "interessado"],
+          })
+        )
+      ).toMatchObject({ allowed: false, status: "SKIPPED_TAG_RULE" });
+    });
+
+    it("allows a contact carrying every required tag", () => {
+      expect(
+        decideAutomationSend(
+          input({
+            contactTags: ["lead", "interessado", "extra"],
+            requiredTags: ["lead", "interessado"],
+          })
+        )
+      ).toEqual({ allowed: true });
+    });
+
+    it("blocks a contact carrying an excluded tag", () => {
+      const decision = decideAutomationSend(
+        input({ contactTags: ["cliente"], excludedTags: ["cliente"] })
+      );
+
+      expect(decision).toMatchObject({
+        allowed: false,
+        status: "SKIPPED_TAG_RULE",
+      });
+      if (!decision.allowed) {
+        expect(decision.reason).toContain("excluded tag");
+      }
+    });
+
+    it("compares without case or surrounding space", () => {
+      // "Cliente" e "cliente" são a mesma tag para quem usa o sistema.
+      expect(
+        decideAutomationSend(
+          input({ contactTags: [" Cliente "], excludedTags: ["CLIENTE"] })
+        )
+      ).toMatchObject({ allowed: false, status: "SKIPPED_TAG_RULE" });
+    });
+
+    it("does not filter when both lists are empty", () => {
+      expect(
+        decideAutomationSend(input({ contactTags: ["qualquer", "coisa"] }))
+      ).toEqual({ allowed: true });
+    });
+
+    it("blocks on the tag rule before the frequency rule", () => {
+      // A regra de tag é mais específica: dizer "está no intervalo" para quem
+      // nem devia entrar na campanha manda o usuário investigar a coisa errada.
+      const decision = decideAutomationSend(
+        input({
+          excludedTags: ["cliente"],
+          contactTags: ["cliente"],
+          automationState: [
+            { scopeKey: DM_SCOPE, sentCount: 1, lastSentAt: hoursAgo(1) },
+          ],
+        })
+      );
+
+      expect(decision).toMatchObject({ status: "SKIPPED_TAG_RULE" });
+    });
+
+    it("still lets opt-out win over the tag rule", () => {
+      expect(
+        decideAutomationSend(
+          input({
+            optedOut: true,
+            excludedTags: ["cliente"],
+            contactTags: ["cliente"],
+          })
+        )
+      ).toMatchObject({ status: "SKIPPED_OPTED_OUT" });
+    });
   });
 
   describe("ONCE_PER_POST", () => {

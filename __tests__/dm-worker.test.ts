@@ -176,6 +176,8 @@ const mockAutomation = {
   },
   sendFrequency: "ONCE_PER_CONTACT",
   resendCooldownHours: 24,
+  requiredTags: [],
+  excludedTags: [],
   storyReplyTriggerEnabled: false,
   storyMentionTriggerEnabled: false,
   trackedLinks: [],
@@ -256,6 +258,7 @@ beforeEach(() => {
     optedOut: false,
     lastAutomationSentAt: null,
     username: "commenter_user",
+    tags: [],
   });
   mockPrisma.contact.findUnique.mockResolvedValue(null);
   mockPrisma.contact.update.mockResolvedValue({});
@@ -1489,6 +1492,7 @@ describe("DM Worker — DM keyword trigger", () => {
       optedOut: true,
       lastAutomationSentAt: null,
       username: "commenter_user",
+      tags: [],
     });
 
     const processor = getProcessor();
@@ -1502,6 +1506,53 @@ describe("DM Worker — DM keyword trigger", () => {
     );
   });
 
+  it("should skip an automation whose tag condition the contact fails", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...dmTriggerAutomation, excludedTags: ["cliente"] },
+    ]);
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+      tags: ["cliente"],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    // Decided without touching the history table: a blocked automation costs no
+    // query.
+    expect(mockPrisma.contactAutomationState.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_TAG_RULE",
+          errorMessage: expect.stringContaining("cliente"),
+        }),
+      })
+    );
+  });
+
+  it("should send when the contact carries the required tag", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...dmTriggerAutomation, requiredTags: ["lead"] },
+    ]);
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+      tags: ["lead"],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
   it("should hold back a second automation inside the workspace anti-flood window", async () => {
     mockPrisma.instagramAccount.findUnique.mockResolvedValue({
       id: "ig_account_row_1",
@@ -1513,6 +1564,7 @@ describe("DM Worker — DM keyword trigger", () => {
       optedOut: false,
       lastAutomationSentAt: new Date(Date.now() - 60 * 60 * 1000),
       username: "commenter_user",
+      tags: [],
     });
 
     const processor = getProcessor();

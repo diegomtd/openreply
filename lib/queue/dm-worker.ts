@@ -1161,6 +1161,8 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       followPromptButtonLabel: true,
       sendFrequency: true,
       resendCooldownHours: true,
+      requiredTags: true,
+      excludedTags: true,
       instagramAccount: {
         select: { instagramId: true, accessToken: true },
       },

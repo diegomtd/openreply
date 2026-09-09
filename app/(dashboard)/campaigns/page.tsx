@@ -37,6 +37,8 @@ interface Campaign {
   dmTriggerEnabled: boolean;
   storyReplyTriggerEnabled: boolean;
   storyMentionTriggerEnabled: boolean;
+  requiredTags: string[];
+  excludedTags: string[];
   sendFrequency: "ONCE_PER_CONTACT" | "ONCE_PER_POST" | "COOLDOWN" | "ALWAYS" | null;
   resendCooldownHours: number | null;
   isActive: boolean;
@@ -537,6 +539,24 @@ export default function CampaignsPage() {
                   {auto.storyMentionTriggerEnabled && (
                     <span className="rounded-full border border-border px-2 py-0.5 text-muted">
                       menção em story
+                    </span>
+                  )}
+                  {(auto.requiredTags?.length > 0 ||
+                    auto.excludedTags?.length > 0) && (
+                    <span
+                      className="rounded-full border border-border px-2 py-0.5 text-muted"
+                      title={[
+                        auto.requiredTags?.length
+                          ? `só quem tem: ${auto.requiredTags.join(", ")}`
+                          : "",
+                        auto.excludedTags?.length
+                          ? `nunca quem tem: ${auto.excludedTags.join(", ")}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    >
+                      condição de tag
                     </span>
                   )}
                   <span

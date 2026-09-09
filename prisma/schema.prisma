@@ -227,6 +227,10 @@ model Automation {
   /// Only read when sendFrequency is COOLDOWN: hours to wait before the same
   /// person may receive this automation again.
   resendCooldownHours Int           @default(24)
+  /// Só envia para quem tem TODAS estas tags. Vazio = sem exigência.
+  requiredTags String[] @default([])
+  /// Nunca envia para quem tem QUALQUER uma destas tags. Vazio = sem exclusão.
+  excludedTags String[] @default([])
   reportShareSlug    String? @unique
   reportShareEnabled Boolean @default(true)
 
@@ -497,6 +501,9 @@ enum DmStatus {
   SKIPPED_COOLDOWN
   /// The contact opted out (stop word) or was muted from the Contacts screen.
   SKIPPED_OPTED_OUT
+  /// Blocked by the automation's tag condition (a required tag is missing, or an
+  /// excluded tag is present).
+  SKIPPED_TAG_RULE
 }
 
 enum SendFrequency {

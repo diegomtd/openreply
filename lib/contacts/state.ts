@@ -7,12 +7,14 @@
  * looked brand new and re-triggered the same automation — the same person got
  * the same message on every message they sent, forever.
  *
- * Three layers decide a send, cheapest first:
+ * Four layers decide a send, cheapest first:
  *   1. Opt-out. A contact who said stop, or was muted by hand, never receives
  *      an automated message again.
- *   2. Per-automation frequency (`Automation.sendFrequency`): once per person,
+ *   2. Tag condition (`Automation.requiredTags` / `excludedTags`): the
+ *      configuration equivalent of ManyChat's Condition node.
+ *   3. Per-automation frequency (`Automation.sendFrequency`): once per person,
  *      once per person per post, after a cooldown, or always.
- *   3. Workspace anti-flood (`Workspace.contactCooldownHours`): a ceiling across
+ *   4. Workspace anti-flood (`Workspace.contactCooldownHours`): a ceiling across
  *      *every* automation, so three matching campaigns cannot mean three DMs.
  *
  * The decision itself (`decideAutomationSend`) is pure so it can be tested
@@ -45,7 +47,10 @@ const BUILT_IN_OPT_OUT_KEYWORDS = [
 
 export type SkipStatus = Extract<
   DmStatus,
-  "SKIPPED_OPTED_OUT" | "SKIPPED_ALREADY_SENT" | "SKIPPED_COOLDOWN"
+  | "SKIPPED_OPTED_OUT"
+  | "SKIPPED_ALREADY_SENT"
+  | "SKIPPED_COOLDOWN"
+  | "SKIPPED_TAG_RULE"
 >;
 
 export type SendDecision =
@@ -62,6 +67,12 @@ export interface FrequencyInput {
   now: Date;
   /** Contact is muted or opted out. */
   optedOut: boolean;
+  /** Tags on the contact. */
+  contactTags: string[];
+  /** Send only to a contact carrying ALL of these. Empty = no requirement. */
+  requiredTags: string[];
+  /** Never send to a contact carrying ANY of these. Empty = no exclusion. */
+  excludedTags: string[];
   sendFrequency: SendFrequency;
   /** Only read when sendFrequency is COOLDOWN. */
   resendCooldownHours: number;
@@ -81,6 +92,11 @@ function hoursSince(now: Date, then: Date): number {
   return (now.getTime() - then.getTime()) / HOUR_MS;
 }
 
+/** Tags são comparadas sem caixa e sem espaço nas pontas. */
+export function normalizeTag(tag: string): string {
+  return tag.trim().toLowerCase();
+}
+
 function formatWhen(date: Date): string {
   return date.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
@@ -94,6 +110,34 @@ export function decideAutomationSend(input: FrequencyInput): SendDecision {
       allowed: false,
       status: "SKIPPED_OPTED_OUT",
       reason: "Contact opted out of automated messages",
+    };
+  }
+
+  // Tag condition. Compared case-insensitively, because a tag typed as "Cliente"
+  // in one place and "cliente" in another is the same tag to the person using it.
+  const tags = new Set(input.contactTags.map(normalizeTag));
+
+  const missing = input.requiredTags
+    .map(normalizeTag)
+    .filter((tag) => tag && !tags.has(tag));
+  if (missing.length > 0) {
+    return {
+      allowed: false,
+      status: "SKIPPED_TAG_RULE",
+      reason: `Contact is missing the required tag${
+        missing.length > 1 ? "s" : ""
+      }: ${missing.join(", ")}`,
+    };
+  }
+
+  const blocking = input.excludedTags
+    .map(normalizeTag)
+    .filter((tag) => tag && tags.has(tag));
+  if (blocking.length > 0) {
+    return {
+      allowed: false,
+      status: "SKIPPED_TAG_RULE",
+      reason: `Contact carries an excluded tag: ${blocking.join(", ")}`,
     };
   }
 
@@ -210,6 +254,7 @@ export interface ContactRecord {
   optedOut: boolean;
   lastAutomationSentAt: Date | null;
   username: string | null;
+  tags: string[];
 }
 
 /**
@@ -245,6 +290,7 @@ export async function getOrCreateContact(params: {
       optedOut: true,
       lastAutomationSentAt: true,
       username: true,
+      tags: true,
     },
   });
 }
@@ -271,6 +317,8 @@ export async function canSendAutomation(params: {
     id: string;
     sendFrequency: SendFrequency;
     resendCooldownHours: number;
+    requiredTags: string[];
+    excludedTags: string[];
   };
   workspaceCooldownHours: number;
   scopeKey: string;
@@ -283,6 +331,9 @@ export async function canSendAutomation(params: {
     return decideAutomationSend({
       now: params.now ?? new Date(),
       optedOut: true,
+      contactTags: contact.tags,
+      requiredTags: automation.requiredTags,
+      excludedTags: automation.excludedTags,
       sendFrequency: automation.sendFrequency,
       resendCooldownHours: automation.resendCooldownHours,
       workspaceCooldownHours,
@@ -292,6 +343,24 @@ export async function canSendAutomation(params: {
     });
   }
 
+  // A condição de tag é decidida sem tocar o banco, então confere antes de
+  // carregar o histórico: uma automação que a tag bloqueia não custa query.
+  const tagOnly = decideAutomationSend({
+    now: params.now ?? new Date(),
+    optedOut: false,
+    contactTags: contact.tags,
+    requiredTags: automation.requiredTags,
+    excludedTags: automation.excludedTags,
+    // Neutro: só a regra de tag pode reprovar nesta passada.
+    sendFrequency: "ALWAYS",
+    resendCooldownHours: 0,
+    workspaceCooldownHours: 0,
+    lastAutomationSentAt: null,
+    automationState: [],
+    scopeKey,
+  });
+  if (!tagOnly.allowed) return tagOnly;
+
   const automationState =
     automation.sendFrequency === "ALWAYS"
       ? []
@@ -300,6 +369,9 @@ export async function canSendAutomation(params: {
   return decideAutomationSend({
     now: params.now ?? new Date(),
     optedOut: false,
+    contactTags: contact.tags,
+    requiredTags: automation.requiredTags,
+    excludedTags: automation.excludedTags,
     sendFrequency: automation.sendFrequency,
     resendCooldownHours: automation.resendCooldownHours,
     workspaceCooldownHours,

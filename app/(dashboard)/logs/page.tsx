@@ -42,6 +42,7 @@ const STATUS_FILTERS: { value: string; label: string }[] = [
   { value: "SKIPPED_ALREADY_SENT", label: "Já recebeu" },
   { value: "SKIPPED_COOLDOWN", label: "Em intervalo" },
   { value: "SKIPPED_OPTED_OUT", label: "Silenciado" },
+  { value: "SKIPPED_TAG_RULE", label: "Regra de tag" },
   { value: "SKIPPED_RATE_LIMIT", label: "Limite por hora" },
   { value: "SKIPPED_PLAN_LIMIT", label: "Limite do mês" },
   { value: "SKIPPED_DEDUP", label: "Duplicado" },

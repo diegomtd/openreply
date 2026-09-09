@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
-import { optInContact, optOutContact } from "@/lib/contacts/state";
+import { normalizeTag, optInContact, optOutContact } from "@/lib/contacts/state";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 const FILTERS = ["all", "muted", "messaged", "never_messaged"] as const;
@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     ? (rawFilter as Filter)
     : "all";
   const instagramAccountId = params.get("instagramAccountId");
+  const tag = normalizeTag(params.get("tag") ?? "");
 
   const where: Prisma.ContactWhereInput = {
     workspaceId,
@@ -49,6 +50,7 @@ export async function GET(request: NextRequest) {
     ...(filter === "muted" ? { optedOut: true } : {}),
     ...(filter === "messaged" ? { lastAutomationSentAt: { not: null } } : {}),
     ...(filter === "never_messaged" ? { lastAutomationSentAt: null } : {}),
+    ...(tag ? { tags: { has: tag } } : {}),
     ...(search
       ? {
           OR: [
@@ -105,10 +107,16 @@ export async function GET(request: NextRequest) {
   });
 }
 
-const patchSchema = z.object({
-  id: z.string().min(1),
-  optedOut: z.boolean(),
-});
+const patchSchema = z
+  .object({
+    id: z.string().min(1),
+    optedOut: z.boolean().optional(),
+    /** Substitui a lista inteira. Normalizadas e sem repetição. */
+    tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  })
+  .refine((d) => d.optedOut !== undefined || d.tags !== undefined, {
+    message: "Nada para atualizar: informe optedOut ou tags",
+  });
 
 export async function PATCH(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -132,7 +140,10 @@ export async function PATCH(request: NextRequest) {
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { success: false, error: "id and optedOut are required" },
+      {
+        success: false,
+        error: parsed.error.issues[0]?.message ?? "Dados inválidos",
+      },
       { status: 400 }
     );
   }
@@ -150,11 +161,29 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
-  if (parsed.data.optedOut) {
-    await optOutContact(contact.id, "Muted from the Contacts screen");
-  } else {
-    await optInContact(contact.id);
+  if (parsed.data.optedOut !== undefined) {
+    if (parsed.data.optedOut) {
+      await optOutContact(contact.id, "Silenciado na tela de Contatos");
+    } else {
+      await optInContact(contact.id);
+    }
   }
 
-  return NextResponse.json({ success: true, data: { id: contact.id } });
+  let tags: string[] | undefined;
+  if (parsed.data.tags !== undefined) {
+    // Normalizadas e sem repetição: "Cliente" e "cliente" são a mesma tag para
+    // quem usa, e a condição da automação compara desse jeito.
+    tags = Array.from(new Set(parsed.data.tags.map(normalizeTag))).filter(
+      Boolean
+    );
+    await prisma.contact.update({
+      where: { id: contact.id },
+      data: { tags },
+    });
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: { id: contact.id, ...(tags ? { tags } : {}) },
+  });
 }

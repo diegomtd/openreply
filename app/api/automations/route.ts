@@ -77,6 +77,9 @@ const createAutomationSchema = z
       .optional()
       .default("ONCE_PER_CONTACT"),
     resendCooldownHours: z.number().int().min(1).max(8760).optional().default(24),
+    // Condição por tag do contato — o equivalente ao nó de Condição do ManyChat.
+    requiredTags: z.array(z.string().trim().min(1).max(40)).max(10).optional().default([]),
+    excludedTags: z.array(z.string().trim().min(1).max(40)).max(10).optional().default([]),
   })
   // A campaign needs at least one trigger. A post target is only required when
   // nothing else fires it: an automation that answers DMs, story replies or
@@ -160,6 +163,8 @@ const updateAutomationSchema = z.object({
     .enum(["ONCE_PER_CONTACT", "ONCE_PER_POST", "COOLDOWN", "ALWAYS"])
     .optional(),
   resendCooldownHours: z.number().int().min(1).max(8760).optional(),
+  requiredTags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  excludedTags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
   reportShareEnabled: z.boolean().optional(),
   // Empty string clears the tracked link; a URL updates/creates it; undefined
   // leaves it unchanged.
@@ -174,6 +179,13 @@ const updateAutomationSchema = z.object({
     .nullable(),
   secondaryButtonLabel: z.string().max(20).optional().nullable(),
 });
+
+/** Tags gravadas normalizadas, para a condição casar com as do contato. */
+function normalizeTagList(tags: string[]): string[] {
+  return Array.from(
+    new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))
+  );
+}
 
 export async function GET(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -492,6 +504,8 @@ export async function POST(request: NextRequest) {
       wholeWordMatch: parsed.data.wholeWordMatch,
       sendFrequency: parsed.data.sendFrequency,
       resendCooldownHours: parsed.data.resendCooldownHours,
+      requiredTags: normalizeTagList(parsed.data.requiredTags),
+      excludedTags: normalizeTagList(parsed.data.excludedTags),
       workspaceId,
       instagramAccountId: instagramAccount.id,
       reportShareSlug: generateReportShareSlug(),
@@ -571,6 +585,12 @@ export async function PATCH(request: NextRequest) {
     ...automationData
   } = parsed.data;
 
+  if (automationData.requiredTags !== undefined) {
+    automationData.requiredTags = normalizeTagList(automationData.requiredTags);
+  }
+  if (automationData.excludedTags !== undefined) {
+    automationData.excludedTags = normalizeTagList(automationData.excludedTags);
+  }
   // Keep dependent fields consistent: any-word clears keywords; a disabled
   // opening DM clears its message and button.
   if (automationData.matchAnyWord === true) automationData.keywords = [];

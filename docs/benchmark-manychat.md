@@ -124,9 +124,12 @@ Legenda: ✅ existe no OpenReply · 🟡 parcial · ➕ adicionado neste trabalh
 - ➕ **Teto global anti-flood por contato, somando todas as automações**
 - ➕ **Opt-out por palavra ("parar", "sair", "stop") e mute manual**
 - ➕ **Skip logado com motivo, em vez de silêncio**
+- ➕ **Condição por tag do contato** (exigir todas / excluir qualquer) — o nó de
+  Condição do ManyChat, como configuração
 
 ### Pessoas
-- ➕ **Tela de Contatos: quem é, o que já recebeu, tags, opt-out, histórico**
+- ➕ **Tela de Contatos: quem é, o que já recebeu, opt-out, histórico**
+- ➕ **Tags editáveis e filtráveis**, usadas como condição de automação
 - 🟡 Inbox de DMs (existe, janela de 24h, cache no cliente)
 - ⬜ Campos personalizados · segmentos salvos · atribuição para time
 
@@ -220,7 +223,6 @@ gerou este trabalho.
 
 | Prioridade | Item | Por que |
 |---|---|---|
-| P2 | Tags e campos usados como condição | A base já está no `Contact` |
 | P2 | Funil por automação: enviado → lido → clicado | Fecha a conta do ROI |
 | P3 | Editor de mensagem em blocos | Antes de qualquer canvas |
 | P3 | Canvas visual | Só se aparecer necessidade real de ramificação |

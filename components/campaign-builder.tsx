@@ -57,6 +57,8 @@ interface LoadedCampaign {
   publicReplyMessages: string[];
   sendFrequency: SendFrequency | null;
   resendCooldownHours: number | null;
+  requiredTags?: string[];
+  excludedTags?: string[];
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
@@ -65,6 +67,18 @@ interface LoadedCampaign {
 interface CampaignBuilderProps {
   mode: "new" | "edit";
   campaignId?: string;
+}
+
+/** "cliente, vip" → ["cliente", "vip"], normalizado. */
+function parseTagList(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
 }
 
 /** "1h30" lê melhor que "90 minutos" ao somar passos. */
@@ -207,6 +221,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [sendFrequency, setSendFrequency] =
     useState<SendFrequency>("ONCE_PER_CONTACT");
   const [resendCooldownHours, setResendCooldownHours] = useState(24);
+  // Condição por tag do contato: o equivalente ao nó de Condição do ManyChat,
+  // mas como configuração em vez de flow.
+  const [requiredTagsText, setRequiredTagsText] = useState("");
+  const [excludedTagsText, setExcludedTagsText] = useState("");
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -350,6 +368,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         );
         setSendFrequency(c.sendFrequency ?? "ONCE_PER_CONTACT");
         setResendCooldownHours(c.resendCooldownHours ?? 24);
+        setRequiredTagsText((c.requiredTags ?? []).join(", "));
+        setExcludedTagsText((c.excludedTags ?? []).join(", "));
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -508,6 +528,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         : [],
       sendFrequency,
       resendCooldownHours,
+      requiredTags: parseTagList(requiredTagsText),
+      excludedTags: parseTagList(excludedTagsText),
       isActive: activeValue,
     };
 
@@ -1239,6 +1261,48 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             <p className="text-xs text-muted">
               Quem responder &ldquo;parar&rdquo; ou &ldquo;sair&rdquo; é
               silenciado em todas as automações. Dá para silenciar à mão em
+              Contatos.
+            </p>
+          </div>
+
+          {/* Condição por tag. Fica junto da frequência porque as duas decidem
+              a mesma coisa: se esta pessoa recebe ou não. */}
+          <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
+            <p className="text-sm text-foreground">e só para quem</p>
+            <div className="space-y-1">
+              <label
+                htmlFor="requiredTags"
+                className="text-xs font-semibold text-muted"
+              >
+                tem estas tags
+              </label>
+              <input
+                id="requiredTags"
+                value={requiredTagsText}
+                onChange={(e) => setRequiredTagsText(e.target.value)}
+                placeholder="ex.: lead, interessado"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="excludedTags"
+                className="text-xs font-semibold text-muted"
+              >
+                e não tem estas
+              </label>
+              <input
+                id="excludedTags"
+                value={excludedTagsText}
+                onChange={(e) => setExcludedTagsText(e.target.value)}
+                placeholder="ex.: cliente, ja comprou"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              />
+            </div>
+            <p className="text-xs text-muted">
+              Separe por vírgula. Vazio não filtra nada. Precisa ter{" "}
+              <strong>todas</strong> as exigidas, e{" "}
+              <strong>nenhuma</strong> das excluídas. As tags saem da tela de
               Contatos.
             </p>
           </div>

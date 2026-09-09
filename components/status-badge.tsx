@@ -13,6 +13,7 @@ const statusConfig: Record<string, { text: string; label: string }> = {
   SKIPPED_ALREADY_SENT: { text: "text-muted", label: "Já recebeu" },
   SKIPPED_COOLDOWN: { text: "text-muted", label: "Em intervalo" },
   SKIPPED_OPTED_OUT: { text: "text-muted", label: "Silenciado" },
+  SKIPPED_TAG_RULE: { text: "text-muted", label: "Regra de tag" },
 };
 
 interface StatusBadgeProps {

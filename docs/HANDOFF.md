@@ -128,13 +128,14 @@ User ─ WorkspaceMember ─ Workspace ─ InstagramAccount ─ Automation
   ou `dm:<mid>` (DM recebido), ou `reveal:<igsid>` (toque no botão).
 - **`ProcessedComment`** = set de dedupe compartilhado webhook↔polling.
 - **`Contact`** = a pessoa (IGSID) por conta de Instagram. Guarda `optedOut`,
-  `lastAutomationSentAt`, `automationSentCount`, `tags`.
+  `lastAutomationSentAt`, `automationSentCount` e `tags` (editáveis na tela de
+  Contatos, usadas como condição de automação — ver §5.3).
 - **`ContactAutomationState`** = quantas vezes *esta* automação já foi entregue
   para *este* contato, e quando. É o que impede repetição.
 
 `DmStatus`: `PENDING · SENT · FAILED · SKIPPED_DEDUP · SKIPPED_RATE_LIMIT ·
 SKIPPED_PLAN_LIMIT · SKIPPED_NO_MATCH · SKIPPED_ALREADY_SENT ·
-SKIPPED_COOLDOWN · SKIPPED_OPTED_OUT`
+SKIPPED_COOLDOWN · SKIPPED_OPTED_OUT · SKIPPED_TAG_RULE`
 
 ---
 
@@ -237,6 +238,35 @@ a API não leem nem escrevem mais nesses campos** — as telas só os usam como
 fallback de leitura para uma automação que a migration não tenha convertido.
 Não escreva neles em código novo. Job antigo sem `stepOrder` é tratado como
 passo 1.
+
+## 5.3 Condição por tag — como funciona
+
+`Contact.tags` já existia no schema mas não tinha como preencher nem usar. Agora:
+
+- **Editáveis** na tela de Contatos (painel expandido do contato), e clicáveis
+  para filtrar a lista.
+- **Usadas como condição** por automação: `Automation.requiredTags` (precisa ter
+  **todas**) e `excludedTags` (não pode ter **nenhuma**). É o equivalente ao nó
+  de Condição do ManyChat, como configuração em vez de flow.
+
+Detalhes que importam:
+
+1. **Normalização.** Tag é sempre gravada e comparada em minúsculas, sem espaço
+   nas pontas (`normalizeTag`). "Cliente" e "cliente" são a mesma tag para quem
+   usa o sistema, e tratar diferente só geraria bug silencioso. A API normaliza
+   nos dois lados: no contato e na condição da automação.
+2. **Ordem da decisão** em `decideAutomationSend`: opt-out → **tag** →
+   frequência → teto do workspace. A tag vem antes da frequência de propósito:
+   dizer "está no intervalo" para quem nem devia entrar na campanha manda a
+   pessoa investigar a coisa errada.
+3. **Custo zero de query** quando a tag bloqueia: `canSendAutomation` decide a
+   condição de tag na memória (o contato já traz `tags`) **antes** de carregar o
+   histórico de envios. Uma automação que a tag reprova não gasta banco.
+4. O skip aparece como `SKIPPED_TAG_RULE` nos Registros, com o motivo dizendo
+   qual tag faltou ou qual bloqueou.
+
+Caso de uso que motivou: marcar quem já comprou como `cliente` e excluir essa
+tag da automação de captura, para o cliente não receber a isca de novo.
 
 ## 6. Decisões de arquitetura (e por quê)
 
@@ -372,9 +402,11 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 | Prioridade | Item | Nota |
 |---|---|---|
 | ~~P1~~ | ~~Story reply / story mention como gatilho~~ | **Feito** em 2026-09-09. Ver §5.1. |
+| ~~P2~~ | ~~Tags como condição~~ | **Feito** em 2026-09-09. Ver §5.3. |
 | ~~P1~~ | ~~Sequência de 2–3 mensagens dentro da janela de 24h~~ | **Feito** em 2026-09-09. Ver §5.2. |
 | P1 | Broadcast (disparo para a base) | Precisa respeitar as tags de marketing da Meta |
-| P2 | Tags e campos personalizados usados em condição de automação | Base (`Contact.tags`) já existe |
+| ~~P2~~ | ~~Tags usadas em condição de automação~~ | **Feito** em 2026-09-09. Ver §5.3. |
+| P2 | Campos personalizados (além de tag) | Só se tag não bastar |
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |
 | P3 | Flow builder visual | Só se o negócio realmente precisar de ramificação |
 | P3 | Integrações (Sheets, webhook de saída) | Depende de demanda |
@@ -385,6 +417,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |
 | 2026-09-09 | Sequência de mensagens (`AutomationStep`): até 3 passos depois do link, cadeia que anda um passo por vez, para em opt-out e em falha de envio, com validação da janela de 24h no acumulado. Substituiu o trio `followUp*`, que ficou como legado só de leitura. |
 | 2026-09-09 | Gatilhos de Story: resposta e menção. `parseMessageEvents` passa a classificar em DM / STORY_REPLY / STORY_MENTION; o worker filtra as automações elegíveis por gatilho; escopo de frequência por story. Automação só de mensagem/story não exige mais escolher um post. |
 | 2026-09-08 | Interface traduzida para pt-BR (telas do app, auth e mensagens padrão do DM). Barra lateral com ícones e grupos; Início com atalhos; cartões de automação com selos de gatilho e frequência; Registros com coluna Motivo. Confirmado que este repo é o app em `automacao.conteudos.tech` (o `/api/health` responde com a forma exata de `app/api/health/route.ts`). |

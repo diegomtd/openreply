@@ -68,6 +68,9 @@ export default function ContactsPage() {
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [pendingMute, setPendingMute] = useState<string | null>(null);
+  const [tagFilter, setTagFilter] = useState("");
+  const [tagDraft, setTagDraft] = useState("");
+  const [pendingTags, setPendingTags] = useState<string | null>(null);
 
   const fetchContacts = useCallback(async () => {
     try {
@@ -77,6 +80,7 @@ export default function ContactsPage() {
         filter,
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
+      if (tagFilter) params.set("tag", tagFilter);
       if (selectedAccountId !== "all") {
         params.set("instagramAccountId", selectedAccountId);
       }
@@ -92,7 +96,7 @@ export default function ContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, filter, debouncedSearch, selectedAccountId]);
+  }, [page, filter, debouncedSearch, selectedAccountId, tagFilter]);
 
   useEffect(() => {
     fetch("/api/dashboard/stats")
@@ -120,6 +124,30 @@ export default function ContactsPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [fetchContacts]);
+
+  async function saveTags(contact: Contact, tags: string[]) {
+    setPendingTags(contact.id);
+    try {
+      const res = await fetch("/api/contacts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: contact.id, tags }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.id === contact.id ? { ...c, tags: data.data.tags ?? tags } : c
+          )
+        );
+        setTagDraft("");
+      }
+    } catch (err) {
+      console.error("Falha ao salvar as tags:", err);
+    } finally {
+      setPendingTags(null);
+    }
+  }
 
   async function toggleMute(contact: Contact) {
     setPendingMute(contact.id);
@@ -182,6 +210,19 @@ export default function ContactsPage() {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {tagFilter && (
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setTagFilter("");
+                setPage(1);
+              }}
+              className="flex items-center gap-1 rounded-lg bg-accent/15 px-3 py-1.5 text-xs font-medium text-accent"
+            >
+              tag: {tagFilter} ✕
+            </button>
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -204,7 +245,7 @@ export default function ContactsPage() {
 
       <div className="panel rounded overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-border text-left">
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
@@ -212,6 +253,9 @@ export default function ContactsPage() {
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
                   Conta
+                </th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
+                  Tags
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
                   Envios recebidos
@@ -231,7 +275,7 @@ export default function ContactsPage() {
               {loading &&
                 [...Array(5)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={6} className="px-4 py-4 sm:px-6">
+                    <td colSpan={7} className="px-4 py-4 sm:px-6">
                       <div className="h-4 rounded bg-surface-hover" />
                     </td>
                   </tr>
@@ -240,7 +284,7 @@ export default function ContactsPage() {
               {!loading && contacts.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-4 py-12 text-center text-muted sm:px-6"
                   >
                     {debouncedSearch || filter !== "all"
@@ -266,6 +310,29 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-4 py-4 text-muted sm:px-6">
                         @{contact.instagramAccount.username}
+                      </td>
+                      <td className="px-4 py-4 sm:px-6">
+                        {contact.tags.length === 0 ? (
+                          <span className="text-zinc-500">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {contact.tags.map((tag) => (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => {
+                                  setLoading(true);
+                                  setTagFilter(tag);
+                                  setPage(1);
+                                }}
+                                title={`Filtrar por "${tag}"`}
+                                className="rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent"
+                              >
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-4 text-muted sm:px-6">
                         {contact.automationSentCount}
@@ -301,7 +368,7 @@ export default function ContactsPage() {
 
                     {expanded === contact.id && (
                       <tr className="bg-surface/40">
-                        <td colSpan={6} className="px-4 py-4 sm:px-6">
+                        <td colSpan={7} className="px-4 py-4 sm:px-6">
                           {contact.optedOut && (
                             <p className="mb-3 text-xs text-warning">
                               Silenciado —{" "}
@@ -312,6 +379,65 @@ export default function ContactsPage() {
                           <p className="mb-2 text-xs uppercase tracking-wider text-muted">
                             Visto pela primeira vez em {formatDate(contact.firstSeenAt)}
                           </p>
+
+                          {/* Tags. Uma automação pode exigir ou excluir tag, então
+                              é aqui que se decide quem entra em qual campanha. */}
+                          <div className="mb-4 space-y-2">
+                            <p className="text-xs font-semibold text-muted">
+                              Tags
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {contact.tags.map((tag) => (
+                                <span
+                                  key={tag}
+                                  className="flex items-center gap-1 rounded-md bg-accent/10 px-2 py-0.5 text-xs text-accent"
+                                >
+                                  {tag}
+                                  <button
+                                    type="button"
+                                    disabled={pendingTags === contact.id}
+                                    onClick={() =>
+                                      void saveTags(
+                                        contact,
+                                        contact.tags.filter((t) => t !== tag)
+                                      )
+                                    }
+                                    aria-label={`Remover a tag ${tag}`}
+                                    className="text-accent/70 hover:text-error disabled:opacity-40"
+                                  >
+                                    ✕
+                                  </button>
+                                </span>
+                              ))}
+                              <input
+                                value={
+                                  expanded === contact.id ? tagDraft : ""
+                                }
+                                onChange={(e) => setTagDraft(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key !== "Enter") return;
+                                  e.preventDefault();
+                                  const next = tagDraft.trim().toLowerCase();
+                                  if (!next || contact.tags.includes(next)) {
+                                    setTagDraft("");
+                                    return;
+                                  }
+                                  void saveTags(contact, [
+                                    ...contact.tags,
+                                    next,
+                                  ]);
+                                }}
+                                placeholder="nova tag + Enter"
+                                maxLength={40}
+                                disabled={pendingTags === contact.id}
+                                className="w-40 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none disabled:opacity-40"
+                              />
+                            </div>
+                            <p className="text-xs text-muted">
+                              Uma automação pode exigir ou excluir tags — é assim
+                              que você decide quem entra em qual campanha.
+                            </p>
+                          </div>
                           {contact.automationStates.length === 0 ? (
                             <p className="text-sm text-muted">
                               Nenhuma automação enviou para este contato ainda.
