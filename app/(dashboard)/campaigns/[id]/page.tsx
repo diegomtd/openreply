@@ -36,6 +36,7 @@ interface Campaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  steps?: { order: number; message: string; delayMinutes: number }[];
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -161,6 +162,23 @@ export default function CampaignDetailPage() {
   const matchText = campaign.matchAnyWord
     ? "Qualquer comentário"
     : campaign.keywords.join(", ") || "Sem palavras-chave";
+
+  // A sequência vem de `steps`. O par followUp* é o formato antigo, mantido como
+  // fallback para uma automação que a migration não tenha convertido.
+  const sequence =
+    campaign.steps && campaign.steps.length > 0
+      ? campaign.steps.map((step) => ({
+          message: step.message,
+          delayMinutes: step.delayMinutes,
+        }))
+      : campaign.followUpEnabled && campaign.followUpMessage
+        ? [
+            {
+              message: campaign.followUpMessage,
+              delayMinutes: campaign.followUpDelayMinutes ?? 0,
+            },
+          ]
+        : [];
 
   const metrics = [
     { label: "Envios", value: campaign.analytics.sent },
@@ -293,14 +311,20 @@ export default function CampaignDetailPage() {
           </Summary>
         )}
 
-        {campaign.followUpEnabled && campaign.followUpMessage && (
-          <Summary title="E depois uma mensagem de agradecimento">
-            <FieldBox>{campaign.followUpMessage}</FieldBox>
-            <p className="text-xs text-muted">
-              {campaign.followUpDelayMinutes && campaign.followUpDelayMinutes > 0
-                ? `Enviada ${campaign.followUpDelayMinutes} min depois do link.`
-                : "Enviada logo depois do link."}
-            </p>
+        {sequence.length > 0 && (
+          <Summary title="E depois, nesta ordem">
+            {sequence.map((step, index) => (
+              <div key={index} className="space-y-1">
+                <FieldBox>{step.message}</FieldBox>
+                <p className="text-xs text-muted">
+                  {step.delayMinutes > 0
+                    ? `${step.delayMinutes} min depois ${
+                        index === 0 ? "do link" : "da anterior"
+                      }.`
+                    : `Logo depois ${index === 0 ? "do link" : "da anterior"}.`}
+                </p>
+              </div>
+            ))}
           </Summary>
         )}
       </div>
@@ -382,9 +406,8 @@ export default function CampaignDetailPage() {
             followPromptButtonLabel={
               campaign.followPromptButtonLabel ?? "i'm following"
             }
-            followUpEnabled={campaign.followUpEnabled ?? false}
-            followUpMessage={campaign.followUpMessage ?? ""}
-            followUpDelayMinutes={campaign.followUpDelayMinutes ?? 0}
+            followUpEnabled={sequence.length > 0}
+            followUpSteps={sequence}
           />
           </div>
         )}

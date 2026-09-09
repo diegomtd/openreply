@@ -208,10 +208,12 @@ model Automation {
   requireFollow           Boolean @default(false)
   followPromptMessage     String?
   followPromptButtonLabel String?
+  /// LEGADO — substituído por `steps` (AutomationStep). A migration
+  /// `add_automation_steps` copiou estes três campos para um passo de ordem 1, e
+  /// o worker só lê `steps` desde então. Mantidos para não perder dado e para um
+  /// rollback continuar possível; **não escreva neles em código novo.**
   followUpEnabled Boolean @default(false)
   followUpMessage String?
-  // Minutes to wait after the link is delivered before sending the follow-up.
-  // 0 sends it right away.
   followUpDelayMinutes Int @default(0)
   publicReplyEnabled Boolean @default(false)
   publicReplyMessage String?
@@ -237,10 +239,38 @@ model Automation {
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
   contactStates    ContactAutomationState[]
+  steps            AutomationStep[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
   @@index([postId])
+}
+
+/// Uma mensagem da sequência que sai DEPOIS do link, na ordem.
+///
+/// Substitui o antigo trio `followUp*`, que só permitia uma mensagem. Serve para
+/// qualificar em DM ("de onde você me achou?", "quer que eu te mande o resto?")
+/// em vez de entregar um link e encerrar a conversa.
+///
+/// `delayMinutes` é relativo ao passo anterior, não ao início. A soma dos
+/// atrasos tem que caber na janela de 24h de mensagens do Instagram — passado
+/// isso a Meta recusa o envio — então a API valida o acumulado.
+model AutomationStep {
+  id           String @id @default(cuid())
+  automationId String
+  /// 1, 2, 3… A ordem de envio.
+  order        Int
+  message      String
+  /// Minutos a esperar depois do passo anterior (ou depois do link, no passo 1).
+  delayMinutes Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  automation Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, order])
+  @@index([automationId])
 }
 
 model DmLog {

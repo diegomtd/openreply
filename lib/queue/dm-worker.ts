@@ -885,27 +885,15 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       commenterName,
       "postback"
     );
-    // Optional appreciation follow-up: once the link has been delivered, send a
-    // short thank-you. It is scheduled as its own delayed job so it can go out
-    // some minutes later (followUpDelayMinutes) rather than immediately. The
-    // deterministic job id dedupes repeat button taps to one follow-up per user.
-    if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-      const delayMs =
-        Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000;
-      await getDMQueue().add(
-        FOLLOWUP_JOB_NAME,
-        {
-          instagramAccountId: automation.instagramAccount.instagramId,
-          userId,
-          automationId: automation.id,
-          commenterName,
-        },
-        {
-          delay: delayMs,
-          jobId: `followup_${automation.id}_${userId}`,
-        }
-      );
-    }
+    // The link is out, so the sequence starts. Each step schedules the next one
+    // as it lands, so nothing after an opt-out is ever sent.
+    await scheduleSequenceStep({
+      instagramAccountId: automation.instagramAccount.instagramId,
+      userId,
+      automationId: automation.id,
+      commenterName,
+      afterOrder: 0,
+    });
     await prisma.dmLog.upsert({
       where: {
         automationId_commentId: { automationId: automation.id, commentId: dedupeId },
@@ -963,29 +951,85 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 }
 
 /**
- * Send the scheduled appreciation follow-up. Runs after its delay elapses.
- * Best-effort: if the message can't be delivered (e.g. the 24-hour messaging
- * window closed because the delay was long), it is logged, not retried forever.
+ * Schedule one step of an automation's message sequence.
+ *
+ * Called once after the link is delivered (with `afterOrder` 0) and then by each
+ * step as it lands. Walking the chain forward one job at a time — rather than
+ * queueing every step up front — is what lets a contact who opts out halfway
+ * through stop receiving the rest.
+ */
+async function scheduleSequenceStep(params: {
+  instagramAccountId: string;
+  userId: string;
+  automationId: string;
+  commenterName?: string | null;
+  afterOrder: number;
+}): Promise<void> {
+  const next = await prisma.automationStep.findFirst({
+    where: {
+      automationId: params.automationId,
+      order: { gt: params.afterOrder },
+      message: { not: "" },
+    },
+    orderBy: { order: "asc" },
+    select: { order: true, delayMinutes: true },
+  });
+
+  if (!next) return;
+
+  await getDMQueue().add(
+    FOLLOWUP_JOB_NAME,
+    {
+      instagramAccountId: params.instagramAccountId,
+      userId: params.userId,
+      automationId: params.automationId,
+      commenterName: params.commenterName ?? null,
+      stepOrder: next.order,
+    },
+    {
+      delay: Math.max(0, next.delayMinutes) * 60_000,
+      // Deterministic, so a repeat button tap cannot double up one step.
+      jobId: `step_${params.automationId}_${params.userId}_${next.order}`,
+    }
+  );
+}
+
+/**
+ * Send one step of the sequence, then schedule the one after it.
+ *
+ * Best-effort: if a step cannot be delivered (usually because the delays pushed
+ * it past Instagram's 24-hour messaging window) it is logged, not retried — and
+ * the chain stops there, since every later step would hit the same closed
+ * window.
  */
 async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   const { instagramAccountId, userId, automationId, commenterName } = job.data;
+  // Jobs queued before sequences existed carry no order; they were the single
+  // follow-up, which the migration turned into step 1.
+  const stepOrder = job.data.stepOrder ?? 1;
 
   const automation = await prisma.automation.findFirst({
     where: { id: automationId, isActive: true },
-    include: { instagramAccount: true },
+    include: {
+      instagramAccount: true,
+      steps: { where: { order: stepOrder }, take: 1 },
+    },
   });
+
+  const step = automation?.steps[0];
 
   if (
     !automation ||
-    !automation.followUpEnabled ||
-    !automation.followUpMessage?.trim() ||
+    !step ||
+    !step.message.trim() ||
     automation.instagramAccount.instagramId !== instagramAccountId ||
     !automation.instagramAccount.accessToken
   ) {
     return;
   }
 
-  // Scheduled minutes ago; the contact may have asked to stop since.
+  // Scheduled minutes ago; the contact may have asked to stop since. Returning
+  // here also ends the chain, because the next step is only scheduled below.
   const contact = await prisma.contact.findUnique({
     where: {
       instagramAccountId_igsid: {
@@ -1010,28 +1054,29 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
       automation.instagramAccount.instagramId,
       userId,
       renderMessageWithoutLink({
-        message: automation.followUpMessage,
+        message: step.message,
         commenterName: commenterName ?? null,
       })
     );
   } catch (error) {
     console.log(
-      "[DM Worker] Failed to send follow-up message:",
+      `[DM Worker] Failed to send sequence step ${stepOrder}:`,
       formatError(error)
     );
+    // Don't chain past a failure: a closed messaging window rejects every later
+    // step the same way.
+    return;
   }
+
+  await scheduleSequenceStep({
+    instagramAccountId,
+    userId,
+    automationId,
+    commenterName,
+    afterOrder: stepOrder,
+  });
 }
 
-/**
- * Reply to an inbound DM whose text matches a campaign's keywords.
- *
- * The user has messaged us, so the conversation is already open: this path
- * skips the opening DM (which exists to work around private-reply limits from
- * comments) and delivers the reveal directly, honouring the follow gate.
- * Dedup is per inbound message id so a job retry cannot double-send, and the
- * frequency gate is per person (see lib/contacts/state.ts) so someone who has
- * already had this automation is not answered again on every message they send.
- */
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const {
     instagramAccountId,
@@ -1114,9 +1159,6 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       requireFollow: true,
       followPromptMessage: true,
       followPromptButtonLabel: true,
-      followUpEnabled: true,
-      followUpMessage: true,
-      followUpDelayMinutes: true,
       sendFrequency: true,
       resendCooldownHours: true,
       instagramAccount: {
@@ -1291,24 +1333,16 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
               : "message trigger"
         );
 
-        // The link has been delivered, so the appreciation follow-up applies
-        // here exactly as it does after a button tap. Not scheduled behind the
-        // follow prompt — no link went out yet in that branch.
-        if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-          await getDMQueue().add(
-            FOLLOWUP_JOB_NAME,
-            {
-              instagramAccountId: automation.instagramAccount.instagramId,
-              userId: senderId,
-              automationId: automation.id,
-              commenterName,
-            },
-            {
-              delay: Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000,
-              jobId: `followup_${automation.id}_${senderId}`,
-            }
-          );
-        }
+        // The link has been delivered, so the sequence applies here exactly as it
+        // does after a button tap. Not started behind the follow prompt — no
+        // link went out yet in that branch.
+        await scheduleSequenceStep({
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId: senderId,
+          automationId: automation.id,
+          commenterName,
+          afterOrder: 0,
+        });
       }
 
       // Both branches delivered an automated message to this person, so both

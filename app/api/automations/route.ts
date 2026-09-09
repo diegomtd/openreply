@@ -37,11 +37,18 @@ const createAutomationSchema = z
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().max(20).optional().nullable(),
-    followUpEnabled: z.boolean().optional().default(false),
-    followUpMessage: z.string().max(1000).optional().nullable(),
-    // Minutes to wait before the follow-up. Capped at 24h so it stays inside
-    // Instagram's messaging window.
-    followUpDelayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+    // A sequência que sai depois do link. Até 3 passos: acima disso a soma dos
+    // atrasos quase nunca cabe na janela de 24h, e a conversa vira spam.
+    steps: z
+      .array(
+        z.object({
+          message: z.string().min(1).max(1000),
+          delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+        })
+      )
+      .max(3)
+      .optional()
+      .default([]),
     publicReplyEnabled: z.boolean().optional().default(false),
     publicReplyMessage: z.string().max(1000).optional().nullable(),
     publicReplyMessages: z
@@ -93,6 +100,19 @@ const createAutomationSchema = z
     message: "Add at least one keyword, or match any word",
     path: ["keywords"],
   })
+  // Instagram fecha a janela de mensagens 24h depois da última mensagem da
+  // pessoa. A soma dos atrasos da sequência tem que caber nela, senão os últimos
+  // passos são recusados pela Meta sem nada que o usuário possa fazer.
+  .refine(
+    (d) =>
+      d.steps.reduce((total, step) => total + (step.delayMinutes ?? 0), 0) <=
+      1440,
+    {
+      message:
+        "A soma dos atrasos da sequência passa de 24h, que é a janela de mensagens do Instagram",
+      path: ["steps"],
+    }
+  )
   // An opening DM needs both a message and a button label.
   .refine(
     (d) =>
@@ -122,9 +142,15 @@ const updateAutomationSchema = z.object({
   requireFollow: z.boolean().optional(),
   followPromptMessage: z.string().max(1000).optional().nullable(),
   followPromptButtonLabel: z.string().max(20).optional().nullable(),
-  followUpEnabled: z.boolean().optional(),
-  followUpMessage: z.string().max(1000).optional().nullable(),
-  followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
+  steps: z
+    .array(
+      z.object({
+        message: z.string().min(1).max(1000),
+        delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+      })
+    )
+    .max(3)
+    .optional(),
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
@@ -182,6 +208,10 @@ export async function GET(request: NextRequest) {
           _count: { select: { clicks: true } },
         },
         orderBy: { createdAt: "asc" },
+      },
+      steps: {
+        select: { order: true, message: true, delayMinutes: true },
+        orderBy: { order: "asc" },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -411,6 +441,16 @@ export async function POST(request: NextRequest) {
     .map((m) => m.trim())
     .filter(Boolean);
 
+  // Ordem 1..n vem da posição no array; mensagens vazias são descartadas para
+  // um passo em branco no construtor não virar uma mensagem vazia enviada.
+  const stepCreates = parsed.data.steps
+    .map((step) => ({
+      message: step.message.trim(),
+      delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+    }))
+    .filter((step) => step.message)
+    .map((step, index) => ({ ...step, order: index + 1 }));
+
   const automation = await prisma.automation.create({
     data: {
       name: parsed.data.name,
@@ -441,13 +481,6 @@ export async function POST(request: NextRequest) {
       followPromptButtonLabel: parsed.data.requireFollow
         ? parsed.data.followPromptButtonLabel || null
         : null,
-      followUpEnabled: parsed.data.followUpEnabled,
-      followUpMessage: parsed.data.followUpEnabled
-        ? parsed.data.followUpMessage || null
-        : null,
-      followUpDelayMinutes: parsed.data.followUpEnabled
-        ? parsed.data.followUpDelayMinutes
-        : 0,
       publicReplyEnabled: parsed.data.publicReplyEnabled,
       publicReplyMessages: parsed.data.publicReplyEnabled
         ? publicReplyList
@@ -465,9 +498,11 @@ export async function POST(request: NextRequest) {
       ...(linkCreates.length > 0
         ? { trackedLinks: { create: linkCreates } }
         : {}),
+      ...(stepCreates.length > 0 ? { steps: { create: stepCreates } } : {}),
     },
     include: {
       trackedLinks: true,
+      steps: { orderBy: { order: "asc" } },
     },
   });
 
@@ -532,6 +567,7 @@ export async function PATCH(request: NextRequest) {
     trackedDestinationUrl,
     secondaryDestinationUrl,
     secondaryButtonLabel,
+    steps,
     ...automationData
   } = parsed.data;
 
@@ -545,10 +581,6 @@ export async function PATCH(request: NextRequest) {
   if (automationData.requireFollow === false) {
     automationData.followPromptMessage = null;
     automationData.followPromptButtonLabel = null;
-  }
-  if (automationData.followUpEnabled === false) {
-    automationData.followUpMessage = null;
-    automationData.followUpDelayMinutes = 0;
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {
@@ -572,6 +604,30 @@ export async function PATCH(request: NextRequest) {
     where: { id: automationId },
     data: automationData,
   });
+
+  // A sequência é substituída inteira quando vem no corpo: reordenar ou remover
+  // um passo do meio não tem representação incremental honesta, e o número de
+  // passos é pequeno. `undefined` significa "não mexe".
+  if (steps !== undefined) {
+    const stepRows = steps
+      .map((step) => ({
+        message: step.message.trim(),
+        delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+      }))
+      .filter((step) => step.message)
+      .map((step, index) => ({ ...step, order: index + 1 }));
+
+    await prisma.$transaction([
+      prisma.automationStep.deleteMany({ where: { automationId } }),
+      ...(stepRows.length > 0
+        ? [
+            prisma.automationStep.createMany({
+              data: stepRows.map((step) => ({ ...step, automationId })),
+            }),
+          ]
+        : []),
+    ]);
+  }
 
   // Update, create, or clear the campaign's primary tracked link when a
   // destination URL was supplied. `undefined` means "leave it alone".

@@ -1,5 +1,7 @@
 "use client";
 
+import { Fragment } from "react";
+
 /* eslint-disable @next/next/no-img-element */
 
 /**
@@ -38,8 +40,8 @@ interface CampaignPreviewProps {
   followPromptMessage: string;
   followPromptButtonLabel: string;
   followUpEnabled: boolean;
-  followUpMessage: string;
-  followUpDelayMinutes?: number;
+  /** A sequência que sai depois do link, na ordem. */
+  followUpSteps?: { message: string; delayMinutes: number }[];
 }
 
 const SAMPLE_USER = "username";
@@ -318,8 +320,7 @@ function DmScreen({
   followPromptMessage,
   followPromptButtonLabel,
   followUpEnabled,
-  followUpMessage,
-  followUpDelayMinutes = 0,
+  followUpSteps = [],
   linkUrl,
   inboundMessage,
 }: {
@@ -338,8 +339,8 @@ function DmScreen({
   followPromptMessage: string;
   followPromptButtonLabel: string;
   followUpEnabled: boolean;
-  followUpMessage: string;
-  followUpDelayMinutes?: number;
+  /** A sequência que sai depois do link, na ordem. */
+  followUpSteps?: { message: string; delayMinutes: number }[];
   // Present on the keyword-trigger thread: the DM the user sends to start it.
   inboundMessage?: string;
 }) {
@@ -439,25 +440,26 @@ function DmScreen({
             </div>
           );
         })()}
-        {followUpEnabled && (
-          <>
-            {followUpDelayMinutes > 0 && (
-              <p className="py-1 text-center text-[11px] text-zinc-500">
-                {followUpDelayMinutes} min depois
-              </p>
-            )}
-            <div className="flex items-end gap-2">
-              <Avatar url={avatarUrl} size={24} />
-              <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-zinc-800 px-3 py-2">
-                <p className="whitespace-pre-wrap text-sm">
-                  {followUpMessage.trim()
-                    ? followUpMessage.replace(/\{username\}/g, SAMPLE_USER)
-                    : "Ah, e obrigado por me seguir de verdade. Faz diferença 🙌"}
+        {followUpEnabled &&
+          followUpSteps.map((step, index) => (
+            <Fragment key={index}>
+              {step.delayMinutes > 0 && (
+                <p className="py-1 text-center text-[11px] text-zinc-500">
+                  {step.delayMinutes} min depois
                 </p>
+              )}
+              <div className="flex items-end gap-2">
+                <Avatar url={avatarUrl} size={24} />
+                <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-zinc-800 px-3 py-2">
+                  <p className="whitespace-pre-wrap text-sm">
+                    {step.message.trim()
+                      ? step.message.replace(/\{username\}/g, SAMPLE_USER)
+                      : "sua próxima mensagem…"}
+                  </p>
+                </div>
               </div>
-            </div>
-          </>
-        )}
+            </Fragment>
+          ))}
       </div>
 
       <div className="flex items-center gap-2 px-3 py-3">
@@ -524,8 +526,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
             followUpEnabled={props.followUpEnabled}
-            followUpMessage={props.followUpMessage}
-            followUpDelayMinutes={props.followUpDelayMinutes}
+            followUpSteps={props.followUpSteps}
             linkUrl={props.linkUrl}
           />
         )}
@@ -546,8 +547,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
             followUpEnabled={props.followUpEnabled}
-            followUpMessage={props.followUpMessage}
-            followUpDelayMinutes={props.followUpDelayMinutes}
+            followUpSteps={props.followUpSteps}
             linkUrl={props.linkUrl}
             inboundMessage={props.sampleComment}
           />

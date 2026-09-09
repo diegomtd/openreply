@@ -106,6 +106,7 @@ User ─ WorkspaceMember ─ Workspace ─ InstagramAccount ─ Automation
                                           │                 │
                                           │                 ├─ TrackedLink ─ LinkClick
                                           │                 └─ DmLog
+                                          │                 └─ AutomationStep
                                           └─ Contact ─ ContactAutomationState
                                           └─ FollowerSnapshot
 ```
@@ -117,8 +118,11 @@ User ─ WorkspaceMember ─ Workspace ─ InstagramAccount ─ Automation
   - menção em story (`storyMentionTriggerEnabled`)
 
   Uma automação **só** de mensagem/story não precisa de post — o `refine` da API
-  aceita isso desde os gatilhos de story. Tem opening DM, follow gate,
-  follow-up, public reply.
+  aceita isso desde os gatilhos de story. Tem opening DM, follow gate, resposta
+  pública e sequência de mensagens.
+- **`AutomationStep`** = uma mensagem da sequência que sai **depois do link**,
+  com ordem e atraso relativo ao passo anterior. Substituiu o trio
+  `followUp*`.
 - **`DmLog`** = log de cada envio/skip/falha. Chave de dedupe:
   `@@unique([automationId, commentId])`, onde `commentId` é o id do comentário,
   ou `dm:<mid>` (DM recebido), ou `reveal:<igsid>` (toque no botão).
@@ -202,6 +206,37 @@ resposta a story era indistinguível de um DM, então `dmTriggerEnabled` respond
 as duas coisas. A migration liga `storyReplyTriggerEnabled` onde
 `dmTriggerEnabled` já estava ligado, para **nenhuma automação em produção mudar
 o que responde no deploy**.
+
+## 5.2 Sequência de mensagens — como funciona
+
+`AutomationStep` (ordem, mensagem, `delayMinutes` relativo ao passo anterior).
+Até 3 passos, limite da API.
+
+**A cadeia anda um passo por vez.** Depois que o link é entregue,
+`scheduleSequenceStep({ afterOrder: 0 })` agenda o passo 1; quando o passo 1
+chega, ele agenda o 2, e assim por diante. Não é uma fila montada de uma vez, e
+isso é de propósito: quem pedir "parar" no meio **não recebe o resto** — o
+`processFollowUp` confere `optedOut` antes de enviar e, se estiver silenciado,
+retorna sem agendar o próximo.
+
+Um envio que falha **também encerra a cadeia**: quase sempre é a janela de 24h
+fechada, que recusaria todos os passos seguintes do mesmo jeito.
+
+**Janela de 24h:** o que importa é o atraso **acumulado**, não o de cada passo. A
+API valida `soma <= 1440` minutos e o construtor mostra o total ("Última mensagem
+2h30 depois do link"). Passar disso faria a Meta recusar os últimos passos sem
+nada que o usuário possa fazer.
+
+`jobId` é `step_<automationId>_<userId>_<order>` — determinístico, então toque
+repetido no botão não duplica um passo.
+
+**Legado:** `Automation.followUpEnabled / followUpMessage /
+followUpDelayMinutes` ainda existem no banco. A migration
+`add_automation_steps` copiou o conteúdo para um passo de ordem 1. **O worker e
+a API não leem nem escrevem mais nesses campos** — as telas só os usam como
+fallback de leitura para uma automação que a migration não tenha convertido.
+Não escreva neles em código novo. Job antigo sem `stepOrder` é tratado como
+passo 1.
 
 ## 6. Decisões de arquitetura (e por quê)
 
@@ -337,7 +372,8 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 | Prioridade | Item | Nota |
 |---|---|---|
 | ~~P1~~ | ~~Story reply / story mention como gatilho~~ | **Feito** em 2026-09-09. Ver §5.1. |
-| P1 | Broadcast/sequência dentro da janela de 24h | Precisa respeitar tags de marketing da Meta |
+| ~~P1~~ | ~~Sequência de 2–3 mensagens dentro da janela de 24h~~ | **Feito** em 2026-09-09. Ver §5.2. |
+| P1 | Broadcast (disparo para a base) | Precisa respeitar as tags de marketing da Meta |
 | P2 | Tags e campos personalizados usados em condição de automação | Base (`Contact.tags`) já existe |
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |
 | P3 | Flow builder visual | Só se o negócio realmente precisar de ramificação |
@@ -349,6 +385,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Sequência de mensagens (`AutomationStep`): até 3 passos depois do link, cadeia que anda um passo por vez, para em opt-out e em falha de envio, com validação da janela de 24h no acumulado. Substituiu o trio `followUp*`, que ficou como legado só de leitura. |
 | 2026-09-09 | Gatilhos de Story: resposta e menção. `parseMessageEvents` passa a classificar em DM / STORY_REPLY / STORY_MENTION; o worker filtra as automações elegíveis por gatilho; escopo de frequência por story. Automação só de mensagem/story não exige mais escolher um post. |
 | 2026-09-08 | Interface traduzida para pt-BR (telas do app, auth e mensagens padrão do DM). Barra lateral com ícones e grupos; Início com atalhos; cartões de automação com selos de gatilho e frequência; Registros com coluna Motivo. Confirmado que este repo é o app em `automacao.conteudos.tech` (o `/api/health` responde com a forma exata de `app/api/health/route.ts`). |
 | 2026-09-08 | Análise ManyChat + concorrentes (`docs/benchmark-manychat.md`). Correção do bug de repetição (Contact/ContactAutomationState/sendFrequency/opt-out). Tela de Contatos. Reestruturação do menu. Otimizações de CPU para a VPS. Criação deste handoff. |

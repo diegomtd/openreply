@@ -112,8 +112,9 @@ Legenda: ✅ existe no OpenReply · 🟡 parcial · ➕ adicionado neste trabalh
 - ✅ Até 2 botões de link, cada um com link rastreado próprio
 - ✅ Opening DM com botão (contorna limite de private reply)
 - ✅ Resposta pública no comentário, com variações sorteadas
-- ✅ Follow-up agendado com atraso em minutos
-- ⬜ Imagem/card/galeria · quick replies · sequência de múltiplas mensagens
+- ➕ **Sequência de até 3 mensagens depois do link**, cada uma com seu atraso;
+  para na hora se a pessoa pedir para parar
+- ⬜ Imagem/card/galeria · quick replies
 
 ### Regras e segurança de envio
 - ✅ Rate limit por conta (750 private replies/h) com fila de excedente
@@ -219,7 +220,6 @@ gerou este trabalho.
 
 | Prioridade | Item | Por que |
 |---|---|---|
-| P1 | Sequência de mensagens (2–3 passos com atraso) dentro da janela de 24h | Qualificação em DM converte mais que link seco |
 | P2 | Tags e campos usados como condição | A base já está no `Contact` |
 | P2 | Funil por automação: enviado → lido → clicado | Fecha a conta do ROI |
 | P3 | Editor de mensagem em blocos | Antes de qualquer canvas |

@@ -40,6 +40,9 @@ const {
       findMany: vi.fn(),
       upsert: vi.fn(),
     },
+    automationStep: {
+      findFirst: vi.fn(),
+    },
     $transaction: vi.fn(),
     operationalEvent: {
       create: vi.fn(),
@@ -258,6 +261,8 @@ beforeEach(() => {
   mockPrisma.contact.update.mockResolvedValue({});
   mockPrisma.contactAutomationState.findMany.mockResolvedValue([]);
   mockPrisma.contactAutomationState.upsert.mockResolvedValue({});
+  // Sem sequência configurada, por padrão: nada é agendado depois do link.
+  mockPrisma.automationStep.findFirst.mockResolvedValue(null);
   mockPrisma.$transaction.mockImplementation(async (ops: unknown) =>
     Array.isArray(ops) ? Promise.all(ops) : ops
   );
@@ -850,6 +855,153 @@ describe("DM Worker — Full Pipeline", () => {
         update: expect.objectContaining({ status: "FAILED" }),
       })
     );
+  });
+});
+
+describe("DM Worker — message sequence after the link", () => {
+  function createMockStepJob(data: Record<string, unknown> = {}) {
+    return {
+      name: "process-followup",
+      data: {
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        automationId: "auto_789",
+        commenterName: "commenter_user",
+        stepOrder: 1,
+        ...data,
+      },
+      id: "step_job_001",
+      attemptsMade: 0,
+    };
+  }
+
+  /** An automation carrying one step of the sequence, as the worker loads it. */
+  function automationWithStep(
+    step: { order: number; message: string; delayMinutes?: number } | null
+  ) {
+    return {
+      ...mockAutomation,
+      steps: step
+        ? [{ ...step, delayMinutes: step.delayMinutes ?? 0 }]
+        : [],
+    };
+  }
+
+  it("should start the sequence once the link is delivered", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 1,
+      delayMinutes: 10,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ automationId: "auto_789", stepOrder: 1 }),
+      expect.objectContaining({
+        delay: 10 * 60_000,
+        jobId: "step_auto_789_commenter_999_1",
+      })
+    );
+  });
+
+  it("should send a step and then queue the one after it", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 2,
+      delayMinutes: 60,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "e aí, funcionou?"
+    );
+    // The chain walks forward one job at a time rather than being queued up
+    // front, which is what lets an opt-out midway stop the rest.
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ stepOrder: 2 }),
+      expect.objectContaining({ delay: 60 * 60_000 })
+    );
+  });
+
+  it("should send nothing and stop the chain for a contact who opted out", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOut: true });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should not queue the next step when this one failed to send", async () => {
+    // Usually a closed 24-hour window, which rejects every later step too.
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 2,
+      delayMinutes: 60,
+    });
+    mockSendDirectMessage.mockRejectedValue(
+      new Error("outside of allowed window")
+    );
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should treat a job with no step order as step 1", async () => {
+    // Jobs already queued when sequences shipped were the single follow-up,
+    // which the migration turned into step 1.
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "obrigado por seguir" })
+    );
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ stepOrder: undefined }));
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "obrigado por seguir"
+    );
+  });
+
+  it("should do nothing when the step no longer exists", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(automationWithStep(null));
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should queue nothing after the link when there is no sequence", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.automationStep.findFirst.mockResolvedValue(null);
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 });
 

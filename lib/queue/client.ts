@@ -45,14 +45,19 @@ export interface ProcessPostbackJob {
   fallback?: boolean;
 }
 
-// Scheduled after the link is delivered, to send the appreciation follow-up.
-// Enqueued with a delay (followUpDelayMinutes) so it can fire later, not just
-// immediately.
+// One step of the message sequence that runs after the link is delivered. Each
+// step schedules the next one when it lands, so the chain walks itself forward
+// instead of every step being queued up front — a contact who opts out midway
+// stops receiving the rest.
+//
+// `stepOrder` is absent on jobs enqueued before sequences existed; those were
+// the single follow-up, which the migration turned into step 1.
 export interface ProcessFollowUpJob {
   instagramAccountId: string;
   userId: string;
   automationId: string;
   commenterName?: string | null;
+  stepOrder?: number;
 }
 
 // An inbound message from a user — a plain DM, a reply to one of the account's

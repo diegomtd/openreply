@@ -51,6 +51,7 @@ interface LoadedCampaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  steps?: { order: number; message: string; delayMinutes: number }[];
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -64,6 +65,15 @@ interface LoadedCampaign {
 interface CampaignBuilderProps {
   mode: "new" | "edit";
   campaignId?: string;
+}
+
+/** "1h30" lê melhor que "90 minutos" ao somar passos. */
+function formatDelay(minutes: number): string {
+  if (minutes <= 0) return "na hora";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h${String(rest).padStart(2, "0")}`;
 }
 
 function Section({
@@ -186,9 +196,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followPromptMessage, setFollowPromptMessage] = useState("");
   const [followPromptButtonLabel, setFollowPromptButtonLabel] =
     useState("estou te seguindo");
+  // A sequência que sai depois do link. Até 3 passos, cada um com seu atraso
+  // relativo ao anterior.
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
-  const [followUpMessage, setFollowUpMessage] = useState("");
-  const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  const [steps, setSteps] = useState<
+    { message: string; delayMinutes: number }[]
+  >([{ message: "", delayMinutes: 0 }]);
   // Once per person is the default on purpose: the alternative is re-sending the
   // same automated message to someone who already has it.
   const [sendFrequency, setSendFrequency] =
@@ -201,6 +214,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // of returning to the campaigns list.
   const [importQueue, setImportQueue] = useState<ImportRow[] | null>(null);
   const [importTotal, setImportTotal] = useState(0);
+
+  // A janela de mensagens do Instagram é de 24h contadas da última mensagem da
+  // pessoa, então o que importa é o atraso ACUMULADO, não o de cada passo.
+  const totalStepDelay = useMemo(
+    () =>
+      followUpEnabled
+        ? steps
+            .filter((step) => step.message.trim())
+            .reduce((total, step) => total + step.delayMinutes, 0)
+        : 0,
+    [followUpEnabled, steps]
+  );
 
   const keywords = useMemo(
     () =>
@@ -301,9 +326,28 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowPromptButtonLabel(
           c.followPromptButtonLabel ?? "estou te seguindo"
         );
-        setFollowUpEnabled(c.followUpEnabled ?? false);
-        setFollowUpMessage(c.followUpMessage ?? "");
-        setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        // A sequência vem de `steps`; o par followUp* é o formato antigo, ainda
+        // lido para uma automação que a migration não tenha convertido.
+        const loadedSteps =
+          c.steps && c.steps.length > 0
+            ? c.steps.map((step) => ({
+                message: step.message,
+                delayMinutes: step.delayMinutes,
+              }))
+            : c.followUpMessage
+              ? [
+                  {
+                    message: c.followUpMessage,
+                    delayMinutes: c.followUpDelayMinutes ?? 0,
+                  },
+                ]
+              : [];
+        setFollowUpEnabled(loadedSteps.length > 0);
+        setSteps(
+          loadedSteps.length > 0
+            ? loadedSteps
+            : [{ message: "", delayMinutes: 0 }]
+        );
         setSendFrequency(c.sendFrequency ?? "ONCE_PER_CONTACT");
         setResendCooldownHours(c.resendCooldownHours ?? 24);
       })
@@ -418,6 +462,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     if (!dmMessage.trim()) return setError("Escreva o DM com o link.");
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError("O DM de abertura precisa de mensagem e de texto no botão.");
+    if (followUpEnabled && totalStepDelay > 1440)
+      return setError(
+        "A soma dos atrasos da sequência passa de 24h, que é a janela de mensagens do Instagram."
+      );
 
     setSaving(true);
 
@@ -450,9 +498,14 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       followPromptButtonLabel: requireFollow
         ? followPromptButtonLabel.trim() || "estou te seguindo"
         : "",
-      followUpEnabled,
-      followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
-      followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      steps: followUpEnabled
+        ? steps
+            .map((step) => ({
+              message: step.message.trim(),
+              delayMinutes: step.delayMinutes,
+            }))
+            .filter((step) => step.message)
+        : [],
       sendFrequency,
       resendCooldownHours,
       isActive: activeValue,
@@ -997,7 +1050,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           <div className="mt-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">
-                uma mensagem de agradecimento depois
+                uma sequência de mensagens depois
               </span>
               <Toggle
                 on={followUpEnabled}
@@ -1005,39 +1058,114 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               />
             </div>
             {followUpEnabled && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={followUpMessage}
-                  onChange={(e) => setFollowUpMessage(e.target.value)}
-                  placeholder="Ah, e obrigado por me seguir de verdade. Faz diferença 🙌"
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
-                  maxLength={1000}
-                />
-                <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
-                  <span className="text-xs text-muted">Enviar</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1440}
-                    value={followUpDelayMinutes}
-                    onChange={(e) =>
-                      setFollowUpDelayMinutes(
-                        Math.max(0, Math.min(1440, Math.floor(Number(e.target.value) || 0)))
-                      )
+              <div className="mt-3 space-y-3">
+                {steps.map((step, index) => (
+                  <div
+                    key={index}
+                    className="space-y-2 rounded-lg border border-border p-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-muted">
+                        Mensagem {index + 1}
+                      </span>
+                      {steps.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSteps((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            )
+                          }
+                          className="px-1 text-muted hover:text-error"
+                          aria-label={`Remover mensagem ${index + 1}`}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={step.message}
+                      onChange={(e) =>
+                        setSteps((prev) =>
+                          prev.map((sp, i) =>
+                            i === index ? { ...sp, message: e.target.value } : sp
+                          )
+                        )
+                      }
+                      placeholder={
+                        index === 0
+                          ? "conseguiu abrir o link?"
+                          : index === 1
+                            ? "me conta: você já tentou isso antes?"
+                            : "se quiser, te mando o passo a passo completo"
+                      }
+                      rows={2}
+                      className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                      maxLength={1000}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted">
+                        {index === 0 ? "Enviar" : "Depois da anterior, esperar"}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1440}
+                        value={step.delayMinutes}
+                        onChange={(e) =>
+                          setSteps((prev) =>
+                            prev.map((sp, i) =>
+                              i === index
+                                ? {
+                                    ...sp,
+                                    delayMinutes: Math.max(
+                                      0,
+                                      Math.min(
+                                        1440,
+                                        Math.floor(Number(e.target.value) || 0)
+                                      )
+                                    ),
+                                  }
+                                : sp
+                            )
+                          )
+                        }
+                        className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                      />
+                      <span className="text-xs text-muted">
+                        {index === 0 ? "minutos depois do link" : "minutos"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {steps.length < 3 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSteps((prev) => [
+                        ...prev,
+                        { message: "", delayMinutes: 60 },
+                      ])
                     }
-                    className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
-                  />
-                  <span className="text-xs text-muted">
-                    minutos depois do link
-                  </span>
-                </div>
+                    className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
+                  >
+                    + Adicionar outra mensagem
+                  </button>
+                )}
+
                 <p className="text-xs text-muted">
-                  {followUpDelayMinutes > 0
-                    ? `Enviada ${followUpDelayMinutes} min depois que a pessoa recebe o link.`
-                    : "Enviada logo depois que a pessoa recebe o link."}
-                  {" {username}"} coloca o @ dela. Máximo de 24 horas, para ficar
-                  dentro da janela de mensagens do Instagram.
+                  {"{username}"} coloca o @ da pessoa. A sequência para na hora se
+                  ela pedir para parar.
+                </p>
+                <p
+                  className={`text-xs ${
+                    totalStepDelay > 1440 ? "text-error" : "text-muted"
+                  }`}
+                >
+                  {totalStepDelay > 1440
+                    ? `A soma dos atrasos dá ${formatDelay(totalStepDelay)} e passa das 24h da janela de mensagens do Instagram — as últimas mensagens seriam recusadas.`
+                    : `Última mensagem ${formatDelay(totalStepDelay)} depois do link. A janela do Instagram é de 24h.`}
                 </p>
               </div>
             )}
@@ -1147,8 +1275,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             followPromptMessage={followPromptMessage}
             followPromptButtonLabel={followPromptButtonLabel || "estou te seguindo"}
             followUpEnabled={followUpEnabled}
-            followUpMessage={followUpMessage}
-            followUpDelayMinutes={followUpDelayMinutes}
+            followUpSteps={steps}
           />
         </div>
       </div>
