@@ -4,7 +4,7 @@
  * Campaign Detail
  *
  * Clicking a campaign opens this read-only view: a summary of the automation
- * on the left, and Insights / Preview tabs on the right. Edit and Stop/Resume
+ * à esquerda, e as abas Números / Prévia à direita. Editar e pausar/ativar
  * live in the top bar.
  */
 
@@ -23,6 +23,8 @@ interface Campaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -34,6 +36,7 @@ interface Campaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  steps?: { order: number; message: string; delayMinutes: number }[];
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -47,6 +50,8 @@ interface Campaign {
   }[];
   analytics: {
     sent: number;
+    read: number;
+    readRate: number;
     skipped: number;
     failed: number;
     clicks: number;
@@ -131,12 +136,12 @@ export default function CampaignDetailPage() {
   if (notFound || !campaign) {
     return (
       <div className="panel rounded p-8 text-center">
-        <p className="text-sm text-muted">Campaign not found.</p>
+        <p className="text-sm text-muted">Automação não encontrada.</p>
         <button
           onClick={() => router.push("/campaigns")}
           className="mt-4 rounded border border-border px-4 py-2 text-sm text-muted hover:text-foreground"
         >
-          Back to campaigns
+          Voltar para automações
         </button>
       </div>
     );
@@ -152,19 +157,57 @@ export default function CampaignDetailPage() {
   const hasSecondLink = Boolean(campaign.trackedLinks?.[1]?.destinationUrl);
 
   const trigger = campaign.matchAnyPost
-    ? "Any post or reel"
+    ? "Qualquer post ou reel"
     : campaign.pendingNextReel
-      ? "Your next reel"
-      : "A specific post or reel";
+      ? "Seu próximo reel"
+      : "Um post ou reel específico";
   const matchText = campaign.matchAnyWord
-    ? "Any comment"
-    : campaign.keywords.join(", ") || "No keywords";
+    ? "Qualquer comentário"
+    : campaign.keywords.join(", ") || "Sem palavras-chave";
+
+  // A sequência vem de `steps`. O par followUp* é o formato antigo, mantido como
+  // fallback para uma automação que a migration não tenha convertido.
+  const sequence =
+    campaign.steps && campaign.steps.length > 0
+      ? campaign.steps.map((step) => ({
+          message: step.message,
+          delayMinutes: step.delayMinutes,
+        }))
+      : campaign.followUpEnabled && campaign.followUpMessage
+        ? [
+            {
+              message: campaign.followUpMessage,
+              delayMinutes: campaign.followUpDelayMinutes ?? 0,
+            },
+          ]
+        : [];
 
   const metrics = [
-    { label: "Sends", value: campaign.analytics.sent },
-    { label: "Clicks", value: campaign.analytics.clicks },
-    { label: "CTR", value: `${campaign.analytics.ctr}%` },
-    { label: "Failed", value: campaign.analytics.failed },
+    { label: "Envios", value: campaign.analytics.sent },
+    { label: "Lidos", value: campaign.analytics.read ?? 0 },
+    { label: "Cliques", value: campaign.analytics.clicks },
+    { label: "Falhas", value: campaign.analytics.failed },
+  ];
+
+  // Funil enviado → lido → clicado. É o que diz ONDE a automação perde: se
+  // ninguém lê, o problema é o gatilho ou a janela de 24h; se leem e não
+  // clicam, é a mensagem.
+  const funnel = [
+    {
+      label: "Enviado",
+      value: campaign.analytics.sent,
+      rate: campaign.analytics.sent > 0 ? 100 : 0,
+    },
+    {
+      label: "Lido",
+      value: campaign.analytics.read ?? 0,
+      rate: campaign.analytics.readRate ?? 0,
+    },
+    {
+      label: "Clicou",
+      value: campaign.analytics.clicks,
+      rate: campaign.analytics.ctr,
+    },
   ];
 
   return (
@@ -188,11 +231,11 @@ export default function CampaignDetailPage() {
                 : "bg-zinc-500/10 text-muted"
             }`}
           >
-            {campaign.isActive ? "LIVE" : "Paused"}
+            {campaign.isActive ? "ATIVA" : "Pausada"}
           </span>
         </div>
 
-        <Summary title="When someone comments on">
+        <Summary title="Quando alguém comentar em">
           <div className="flex items-center gap-3">
             {postThumb ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -203,24 +246,36 @@ export default function CampaignDetailPage() {
               />
             ) : (
               <div className="grid h-14 w-14 place-items-center rounded bg-surface-hover text-[10px] text-muted">
-                {campaign.matchAnyPost || campaign.pendingNextReel ? "Any" : "Post"}
+                {campaign.matchAnyPost || campaign.pendingNextReel ? "Qualquer" : "Post"}
               </div>
             )}
             <span className="text-sm text-foreground">{trigger}</span>
           </div>
         </Summary>
 
-        <Summary title="And this comment has">
+        <Summary title="E o comentário tiver">
           <FieldBox>{matchText}</FieldBox>
           {campaign.dmTriggerEnabled && (
             <p className="text-xs text-muted">
-              Also replies when someone DMs{" "}
-              {campaign.matchAnyWord ? "anything" : "these words"}.
+              Responde também quando mandarem{" "}
+              {campaign.matchAnyWord ? "qualquer DM" : "essas palavras no DM"}.
+            </p>
+          )}
+          {campaign.storyReplyTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Responde quem responder um story{" "}
+              {campaign.matchAnyWord ? "com qualquer coisa" : "com essas palavras"}.
+            </p>
+          )}
+          {campaign.storyMentionTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Responde quem mencionar a conta no story (menção não tem texto,
+              então toda menção conta).
             </p>
           )}
           {publicReplies.length > 0 && (
             <div className="space-y-1.5">
-              <p className="text-xs text-muted">Public reply under the post</p>
+              <p className="text-xs text-muted">Resposta pública no post</p>
               {publicReplies.map((m, i) => (
                 <FieldBox key={i}>{m}</FieldBox>
               ))}
@@ -229,38 +284,38 @@ export default function CampaignDetailPage() {
         </Summary>
 
         {campaign.openingDmEnabled && (
-          <Summary title="They will get an opening DM">
-            <FieldBox>{campaign.openingDmMessage || "Opening message"}</FieldBox>
-            <FieldBox>{campaign.openingDmButtonLabel || "Button"}</FieldBox>
+          <Summary title="A pessoa recebe um DM de abertura">
+            <FieldBox>{campaign.openingDmMessage || "Mensagem de abertura"}</FieldBox>
+            <FieldBox>{campaign.openingDmButtonLabel || "Botão"}</FieldBox>
           </Summary>
         )}
 
         {campaign.requireFollow && (
-          <Summary title="They must follow first">
+          <Summary title="Ela precisa te seguir antes">
             <FieldBox>
               {campaign.followPromptMessage ||
-                "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"}
+                "antes de eu te mandar o link, um favor: me segue aqui. é de graça, não ganho nada com isso. toca no botão quando estiver me seguindo e eu te envio na hora"}
             </FieldBox>
             <FieldBox>
-              {campaign.followPromptButtonLabel || "i'm following"}
+              {campaign.followPromptButtonLabel || "estou te seguindo"}
             </FieldBox>
           </Summary>
         )}
 
-        <Summary title="And then, they will get a DM">
+        <Summary title="Depois disso, ela recebe um DM">
           <FieldBox>{campaign.dmMessage}</FieldBox>
           {hasLink && (
-            <FieldBox>{campaign.linkButtonLabel || "Open link"}</FieldBox>
+            <FieldBox>{campaign.linkButtonLabel || "Abrir link"}</FieldBox>
           )}
           {hasSecondLink && (
             <FieldBox>
-              {campaign.trackedLinks?.[1]?.label || "Open link"}
+              {campaign.trackedLinks?.[1]?.label || "Abrir link"}
             </FieldBox>
           )}
         </Summary>
 
         {hasLink && (
-          <Summary title="The exact link sent">
+          <Summary title="O link exato que é enviado">
             {campaign.trackedLinks
               ?.filter((link) => link.destinationUrl)
               .map((link, i) => (
@@ -271,7 +326,7 @@ export default function CampaignDetailPage() {
                     </p>
                   </div>
                   <p className="text-xs text-muted">
-                    {link.label ? `${link.label} · ` : ""}redirects to{" "}
+                    {link.label ? `${link.label} · ` : ""}redireciona para{" "}
                     <span className="break-all">{link.destinationUrl}</span>
                   </p>
                 </div>
@@ -279,14 +334,20 @@ export default function CampaignDetailPage() {
           </Summary>
         )}
 
-        {campaign.followUpEnabled && campaign.followUpMessage && (
-          <Summary title="Then a follow-up message">
-            <FieldBox>{campaign.followUpMessage}</FieldBox>
-            <p className="text-xs text-muted">
-              {campaign.followUpDelayMinutes && campaign.followUpDelayMinutes > 0
-                ? `Sent ${campaign.followUpDelayMinutes} min after the link.`
-                : "Sent right after the link."}
-            </p>
+        {sequence.length > 0 && (
+          <Summary title="E depois, nesta ordem">
+            {sequence.map((step, index) => (
+              <div key={index} className="space-y-1">
+                <FieldBox>{step.message}</FieldBox>
+                <p className="text-xs text-muted">
+                  {step.delayMinutes > 0
+                    ? `${step.delayMinutes} min depois ${
+                        index === 0 ? "do link" : "da anterior"
+                      }.`
+                    : `Logo depois ${index === 0 ? "do link" : "da anterior"}.`}
+                </p>
+              </div>
+            ))}
           </Summary>
         )}
       </div>
@@ -296,10 +357,10 @@ export default function CampaignDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3 border-b border-border pb-3">
           <div className="flex gap-4">
             <TabButton active={tab === "insights"} onClick={() => setTab("insights")}>
-              Insights
+              Números
             </TabButton>
             <TabButton active={tab === "preview"} onClick={() => setTab("preview")}>
-              Preview
+              Prévia
             </TabButton>
           </div>
           <div className="flex items-center gap-2">
@@ -307,7 +368,7 @@ export default function CampaignDetailPage() {
               href={`/campaigns/${campaign.id}/edit`}
               className="rounded border border-border px-3 py-1.5 text-sm text-muted hover:text-foreground"
             >
-              Edit
+              Editar
             </Link>
             <button
               onClick={toggleActive}
@@ -318,21 +379,63 @@ export default function CampaignDetailPage() {
                   : "border-success/30 text-success hover:bg-success/10"
               }`}
             >
-              {campaign.isActive ? "Stop" : "Resume"}
+              {campaign.isActive ? "Pausar" : "Ativar"}
             </button>
           </div>
         </div>
 
         {tab === "insights" && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {metrics.map((m) => (
-              <div key={m.label} className="panel rounded p-4">
-                <p className="text-sm text-muted">{m.label}</p>
-                <p className="mt-1 text-2xl font-semibold text-foreground">
-                  {m.value}
-                </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {metrics.map((m) => (
+                <div key={m.label} className="panel rounded p-4">
+                  <p className="text-sm text-muted">{m.label}</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">
+                    {m.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="panel rounded p-4 sm:p-6">
+              <h2 className="text-sm font-semibold text-foreground">Funil</h2>
+              <p className="mt-1 text-xs text-muted">
+                Onde a automação perde gente. Se ninguém lê, o problema é o
+                gatilho ou a janela de 24h do Instagram. Se leem e não clicam, é
+                a mensagem.
+              </p>
+              <div className="mt-5 space-y-3">
+                {funnel.map((step) => (
+                  <div key={step.label} className="space-y-1">
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="text-foreground">{step.label}</span>
+                      <span className="text-muted">
+                        {step.value}
+                        {step.label !== "Enviado" && (
+                          <span className="ml-2 text-xs">{step.rate}%</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-surface-hover">
+                      <div
+                        className="h-full rounded-full bg-accent"
+                        style={{
+                          width: `${Math.min(100, Math.max(step.value > 0 ? 2 : 0, step.rate))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+              {campaign.analytics.sent > 0 &&
+                (campaign.analytics.read ?? 0) === 0 && (
+                  <p className="mt-4 text-xs text-muted">
+                    Nenhuma leitura registrada ainda. O Instagram só manda recibo
+                    de leitura em algumas conversas, então esta linha pode ficar
+                    em zero mesmo com gente lendo.
+                  </p>
+                )}
+            </div>
           </div>
         )}
 
@@ -354,23 +457,22 @@ export default function CampaignDetailPage() {
             openingDmButtonLabel={campaign.openingDmButtonLabel ?? ""}
             revealMessage={campaign.dmMessage}
             hasLink={hasLink}
-            linkButtonLabel={campaign.linkButtonLabel ?? "Open link"}
+            linkButtonLabel={campaign.linkButtonLabel ?? "Abrir link"}
             linkUrl={
               campaign.trackedLinks?.[0]?.trackedUrl ??
               campaign.trackedLinks?.[0]?.destinationUrl
             }
             hasSecondLink={hasSecondLink}
             secondLinkButtonLabel={
-              campaign.trackedLinks?.[1]?.label ?? "Open link"
+              campaign.trackedLinks?.[1]?.label ?? "Abrir link"
             }
             requireFollow={campaign.requireFollow}
             followPromptMessage={campaign.followPromptMessage ?? ""}
             followPromptButtonLabel={
               campaign.followPromptButtonLabel ?? "i'm following"
             }
-            followUpEnabled={campaign.followUpEnabled ?? false}
-            followUpMessage={campaign.followUpMessage ?? ""}
-            followUpDelayMinutes={campaign.followUpDelayMinutes ?? 0}
+            followUpEnabled={sequence.length > 0}
+            followUpSteps={sequence}
           />
           </div>
         )}

@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * DM Logs Page
+ * Registros
  *
- * Filterable, paginated table of DM logs.
+ * Tabela paginada e filtrável de tudo que o sistema fez: cada envio, cada pulo
+ * com o motivo e cada falha com o erro da Meta.
  */
 
 import { useEffect, useState, useCallback } from "react";
@@ -29,14 +30,22 @@ interface Pagination {
   totalPages: number;
 }
 
-const STATUS_FILTERS = [
-  "ALL",
-  "SENT",
-  "FAILED",
-  "PENDING",
-  "SKIPPED_RATE_LIMIT",
-  "SKIPPED_PLAN_LIMIT",
-  "SKIPPED_DEDUP",
+/**
+ * Os filtros de pulo importam tanto quanto os de envio: é por eles que se
+ * confere se as regras anti-repetição estão fazendo o trabalho.
+ */
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: "ALL", label: "Tudo" },
+  { value: "SENT", label: "Enviado" },
+  { value: "FAILED", label: "Falhou" },
+  { value: "PENDING", label: "Na fila" },
+  { value: "SKIPPED_ALREADY_SENT", label: "Já recebeu" },
+  { value: "SKIPPED_COOLDOWN", label: "Em intervalo" },
+  { value: "SKIPPED_OPTED_OUT", label: "Silenciado" },
+  { value: "SKIPPED_TAG_RULE", label: "Regra de tag" },
+  { value: "SKIPPED_RATE_LIMIT", label: "Limite por hora" },
+  { value: "SKIPPED_PLAN_LIMIT", label: "Limite do mês" },
+  { value: "SKIPPED_DEDUP", label: "Duplicado" },
 ];
 
 export default function LogsPage() {
@@ -63,7 +72,7 @@ export default function LogsPage() {
         setPagination(data.data.pagination);
       }
     } catch (err) {
-      console.error("Failed to fetch logs:", err);
+      console.error("Falha ao carregar os registros:", err);
     } finally {
       setLoading(false);
     }
@@ -102,20 +111,20 @@ export default function LogsPage() {
       {/* Filters */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap gap-2">
-          {STATUS_FILTERS.map((status) => (
+          {STATUS_FILTERS.map((option) => (
             <button
-              key={status}
-              onClick={() => handleFilterChange(status)}
+              key={option.value}
+              onClick={() => handleFilterChange(option.value)}
               className={`
                 px-3 py-1.5 rounded-lg text-xs font-medium transition-all
                 ${
-                  statusFilter === status
+                  statusFilter === option.value
                     ? "bg-accent/15 text-accent border border-accent/20"
                     : "bg-surface text-muted border border-border hover:border-border-hover hover:text-foreground"
                 }
               `}
             >
-              {status === "ALL" ? "All" : status.replace("SKIPPED_", "").replace("_", " ")}
+              {option.label}
             </button>
           ))}
         </div>
@@ -130,18 +139,19 @@ export default function LogsPage() {
 
       {/* Table */}
       <div className="panel rounded overflow-hidden">
-        {/* Six columns don't fit a phone; the table keeps its width and scrolls
-            horizontally inside the panel rather than crushing every cell. */}
+        {/* As colunas não cabem num celular; a tabela mantém a largura e rola
+            na horizontal dentro do painel, em vez de esmagar cada célula. */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-border text-left">
-                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Commenter</th>
-                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Comment</th>
-                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Campaign</th>
-                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Account</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Pessoa</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Mensagem</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Automação</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Conta</th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Status</th>
-                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Time</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Motivo</th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">Quando</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -149,7 +159,7 @@ export default function LogsPage() {
                 <>
                   {[...Array(5)].map((_, i) => (
                     <tr key={i}>
-                      <td colSpan={6} className="px-4 py-4 sm:px-6">
+                      <td colSpan={7} className="px-4 py-4 sm:px-6">
                         <div className="h-4 bg-surface-hover rounded" />
                       </td>
                     </tr>
@@ -158,8 +168,8 @@ export default function LogsPage() {
               )}
               {!loading && logs.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-muted sm:px-6">
-                    No logs found
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted sm:px-6">
+                    Nenhum registro com esse filtro
                   </td>
                 </tr>
               )}
@@ -183,8 +193,15 @@ export default function LogsPage() {
                     <td className="px-4 py-4 sm:px-6">
                       <StatusBadge status={log.status} />
                     </td>
+                    {/* O motivo é a informação mais útil da tela: "não enviei
+                        porque essa pessoa já recebeu em 12/03". */}
+                    <td className="max-w-[260px] px-4 py-4 sm:px-6">
+                      <span className="block truncate text-muted" title={log.errorMessage ?? ""}>
+                        {log.errorMessage ?? "—"}
+                      </span>
+                    </td>
                     <td className="px-4 py-4 text-muted whitespace-nowrap sm:px-6">
-                      {new Date(log.createdAt).toLocaleString("en-US", {
+                      {new Date(log.createdAt).toLocaleString("pt-BR", {
                         month: "short",
                         day: "numeric",
                         hour: "2-digit",
@@ -201,8 +218,8 @@ export default function LogsPage() {
         {pagination && pagination.totalPages > 1 && (
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 border-t border-border sm:px-6">
             <p className="text-xs text-muted">
-              Showing {(pagination.page - 1) * pagination.limit + 1}–
-              {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
+              Mostrando {(pagination.page - 1) * pagination.limit + 1}–
+              {Math.min(pagination.page * pagination.limit, pagination.total)} de{" "}
               {pagination.total}
             </p>
             <div className="flex items-center gap-2">
@@ -214,7 +231,7 @@ export default function LogsPage() {
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:text-foreground hover:border-border-hover transition-all disabled:opacity-30 disabled:pointer-events-none"
               >
-                Previous
+                Anterior
               </button>
               <span className="text-xs text-muted px-2">
                 {page} / {pagination.totalPages}
@@ -227,7 +244,7 @@ export default function LogsPage() {
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted border border-border hover:text-foreground hover:border-border-hover transition-all disabled:opacity-30 disabled:pointer-events-none"
               >
-                Next
+                Próxima
               </button>
             </div>
           </div>

@@ -27,6 +27,8 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
+    storyReplyTriggerEnabled: z.boolean().optional().default(false),
+    storyMentionTriggerEnabled: z.boolean().optional().default(false),
     dmMessage: z.string().min(1).max(1000),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -35,11 +37,18 @@ const createAutomationSchema = z
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().max(20).optional().nullable(),
-    followUpEnabled: z.boolean().optional().default(false),
-    followUpMessage: z.string().max(1000).optional().nullable(),
-    // Minutes to wait before the follow-up. Capped at 24h so it stays inside
-    // Instagram's messaging window.
-    followUpDelayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+    // A sequência que sai depois do link. Até 3 passos: acima disso a soma dos
+    // atrasos quase nunca cabe na janela de 24h, e a conversa vira spam.
+    steps: z
+      .array(
+        z.object({
+          message: z.string().min(1).max(1000),
+          delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+        })
+      )
+      .max(3)
+      .optional()
+      .default([]),
     publicReplyEnabled: z.boolean().optional().default(false),
     publicReplyMessage: z.string().max(1000).optional().nullable(),
     publicReplyMessages: z
@@ -60,17 +69,53 @@ const createAutomationSchema = z
     secondaryButtonLabel: z.string().max(20).optional().nullable(),
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
+    // How often the same person may receive this automation. Defaults to once,
+    // because the alternative is re-sending the same message to someone who
+    // already has it.
+    sendFrequency: z
+      .enum(["ONCE_PER_CONTACT", "ONCE_PER_POST", "COOLDOWN", "ALWAYS"])
+      .optional()
+      .default("ONCE_PER_CONTACT"),
+    resendCooldownHours: z.number().int().min(1).max(8760).optional().default(24),
+    // Condição por tag do contato — o equivalente ao nó de Condição do ManyChat.
+    requiredTags: z.array(z.string().trim().min(1).max(40)).max(10).optional().default([]),
+    excludedTags: z.array(z.string().trim().min(1).max(40)).max(10).optional().default([]),
   })
-  // A campaign must target a specific post, any post, or the next reel.
+  // A campaign needs at least one trigger. A post target is only required when
+  // nothing else fires it: an automation that answers DMs, story replies or
+  // story mentions has no post to point at.
   .refine(
-    (d) => d.matchAnyPost || d.pendingNextReel || Boolean(d.postId),
-    { message: "Choose which post(s) trigger the campaign", path: ["postId"] }
+    (d) =>
+      d.matchAnyPost ||
+      d.pendingNextReel ||
+      Boolean(d.postId) ||
+      d.dmTriggerEnabled ||
+      d.storyReplyTriggerEnabled ||
+      d.storyMentionTriggerEnabled,
+    {
+      message:
+        "Escolha um post/reel, ou ligue um gatilho de DM, resposta de story ou menção",
+      path: ["postId"],
+    }
   )
   // And it must match either specific words or any word.
   .refine((d) => d.matchAnyWord || d.keywords.length >= 1, {
     message: "Add at least one keyword, or match any word",
     path: ["keywords"],
   })
+  // Instagram fecha a janela de mensagens 24h depois da última mensagem da
+  // pessoa. A soma dos atrasos da sequência tem que caber nela, senão os últimos
+  // passos são recusados pela Meta sem nada que o usuário possa fazer.
+  .refine(
+    (d) =>
+      d.steps.reduce((total, step) => total + (step.delayMinutes ?? 0), 0) <=
+      1440,
+    {
+      message:
+        "A soma dos atrasos da sequência passa de 24h, que é a janela de mensagens do Instagram",
+      path: ["steps"],
+    }
+  )
   // An opening DM needs both a message and a button label.
   .refine(
     (d) =>
@@ -90,6 +135,8 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
+  storyReplyTriggerEnabled: z.boolean().optional(),
+  storyMentionTriggerEnabled: z.boolean().optional(),
   dmMessage: z.string().min(1).max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -98,14 +145,26 @@ const updateAutomationSchema = z.object({
   requireFollow: z.boolean().optional(),
   followPromptMessage: z.string().max(1000).optional().nullable(),
   followPromptButtonLabel: z.string().max(20).optional().nullable(),
-  followUpEnabled: z.boolean().optional(),
-  followUpMessage: z.string().max(1000).optional().nullable(),
-  followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
+  steps: z
+    .array(
+      z.object({
+        message: z.string().min(1).max(1000),
+        delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+      })
+    )
+    .max(3)
+    .optional(),
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
   isActive: z.boolean().optional(),
   wholeWordMatch: z.boolean().optional(),
+  sendFrequency: z
+    .enum(["ONCE_PER_CONTACT", "ONCE_PER_POST", "COOLDOWN", "ALWAYS"])
+    .optional(),
+  resendCooldownHours: z.number().int().min(1).max(8760).optional(),
+  requiredTags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  excludedTags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
   reportShareEnabled: z.boolean().optional(),
   // Empty string clears the tracked link; a URL updates/creates it; undefined
   // leaves it unchanged.
@@ -120,6 +179,13 @@ const updateAutomationSchema = z.object({
     .nullable(),
   secondaryButtonLabel: z.string().max(20).optional().nullable(),
 });
+
+/** Tags gravadas normalizadas, para a condição casar com as do contato. */
+function normalizeTagList(tags: string[]): string[] {
+  return Array.from(
+    new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))
+  );
+}
 
 export async function GET(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -155,6 +221,10 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { createdAt: "asc" },
       },
+      steps: {
+        select: { order: true, message: true, delayMinutes: true },
+        orderBy: { order: "asc" },
+      },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -176,10 +246,17 @@ export async function GET(request: NextRequest) {
     })
   );
 
-  const [statusCounts, clickCounts, keywordCounts] = await Promise.all([
+  const [statusCounts, readCounts, clickCounts, keywordCounts] =
+    await Promise.all([
     prisma.dmLog.groupBy({
       by: ["automationId", "status"],
       where: { workspaceId },
+      _count: { _all: true },
+    }),
+    // Quantos dos envios foram lidos. Fecha o funil enviado → lido → clicado.
+    prisma.dmLog.groupBy({
+      by: ["automationId"],
+      where: { workspaceId, status: "SENT", readAt: { not: null } },
       _count: { _all: true },
     }),
     prisma.linkClick.groupBy({
@@ -192,12 +269,13 @@ export async function GET(request: NextRequest) {
       where: { workspaceId, matchedKeyword: { not: null } },
       _count: { _all: true },
     }),
-  ]);
+    ]);
 
   const analytics = new Map<
     string,
     {
       sent: number;
+      read: number;
       skipped: number;
       failed: number;
       clicks: number;
@@ -208,6 +286,7 @@ export async function GET(request: NextRequest) {
   for (const automation of automationsWithReports) {
     analytics.set(automation.id, {
       sent: 0,
+      read: 0,
       skipped: 0,
       failed: 0,
       clicks: 0,
@@ -222,6 +301,11 @@ export async function GET(request: NextRequest) {
     if (row.status === "SENT") item.sent += count;
     if (row.status === "FAILED") item.failed += count;
     if (row.status.startsWith("SKIPPED_")) item.skipped += count;
+  }
+
+  for (const row of readCounts) {
+    const item = analytics.get(row.automationId);
+    if (item) item.read = row._count._all;
   }
 
   for (const row of clickCounts) {
@@ -249,6 +333,7 @@ export async function GET(request: NextRequest) {
     data: automationsWithReports.map((automation) => {
       const item = analytics.get(automation.id) ?? {
         sent: 0,
+        read: 0,
         skipped: 0,
         failed: 0,
         clicks: 0,
@@ -267,6 +352,9 @@ export async function GET(request: NextRequest) {
         analytics: {
           ...item,
           ctr: calculateCtr(item.clicks, item.sent),
+          // Taxa de leitura sobre o que foi entregue. Separa "não abriram" de
+          // "abriram e o link não convenceu", que são problemas opostos.
+          readRate: calculateCtr(item.read, item.sent),
         },
       };
     }),
@@ -364,7 +452,7 @@ export async function POST(request: NextRequest) {
     linkCreates.push({
       workspaceId,
       slug: generateTrackedLinkSlug(),
-      label: secondaryButtonLabel?.trim() || "Open link",
+      label: secondaryButtonLabel?.trim() || "Abrir link",
       destinationUrl: secondaryDestinationUrl,
     });
   }
@@ -383,6 +471,16 @@ export async function POST(request: NextRequest) {
     .map((m) => m.trim())
     .filter(Boolean);
 
+  // Ordem 1..n vem da posição no array; mensagens vazias são descartadas para
+  // um passo em branco no construtor não virar uma mensagem vazia enviada.
+  const stepCreates = parsed.data.steps
+    .map((step) => ({
+      message: step.message.trim(),
+      delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+    }))
+    .filter((step) => step.message)
+    .map((step, index) => ({ ...step, order: index + 1 }));
+
   const automation = await prisma.automation.create({
     data: {
       name: parsed.data.name,
@@ -395,6 +493,8 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
+      storyReplyTriggerEnabled: parsed.data.storyReplyTriggerEnabled,
+      storyMentionTriggerEnabled: parsed.data.storyMentionTriggerEnabled,
       dmMessage: parsed.data.dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
@@ -411,13 +511,6 @@ export async function POST(request: NextRequest) {
       followPromptButtonLabel: parsed.data.requireFollow
         ? parsed.data.followPromptButtonLabel || null
         : null,
-      followUpEnabled: parsed.data.followUpEnabled,
-      followUpMessage: parsed.data.followUpEnabled
-        ? parsed.data.followUpMessage || null
-        : null,
-      followUpDelayMinutes: parsed.data.followUpEnabled
-        ? parsed.data.followUpDelayMinutes
-        : 0,
       publicReplyEnabled: parsed.data.publicReplyEnabled,
       publicReplyMessages: parsed.data.publicReplyEnabled
         ? publicReplyList
@@ -427,15 +520,21 @@ export async function POST(request: NextRequest) {
         : null,
       isActive: parsed.data.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
+      sendFrequency: parsed.data.sendFrequency,
+      resendCooldownHours: parsed.data.resendCooldownHours,
+      requiredTags: normalizeTagList(parsed.data.requiredTags),
+      excludedTags: normalizeTagList(parsed.data.excludedTags),
       workspaceId,
       instagramAccountId: instagramAccount.id,
       reportShareSlug: generateReportShareSlug(),
       ...(linkCreates.length > 0
         ? { trackedLinks: { create: linkCreates } }
         : {}),
+      ...(stepCreates.length > 0 ? { steps: { create: stepCreates } } : {}),
     },
     include: {
       trackedLinks: true,
+      steps: { orderBy: { order: "asc" } },
     },
   });
 
@@ -500,9 +599,16 @@ export async function PATCH(request: NextRequest) {
     trackedDestinationUrl,
     secondaryDestinationUrl,
     secondaryButtonLabel,
+    steps,
     ...automationData
   } = parsed.data;
 
+  if (automationData.requiredTags !== undefined) {
+    automationData.requiredTags = normalizeTagList(automationData.requiredTags);
+  }
+  if (automationData.excludedTags !== undefined) {
+    automationData.excludedTags = normalizeTagList(automationData.excludedTags);
+  }
   // Keep dependent fields consistent: any-word clears keywords; a disabled
   // opening DM clears its message and button.
   if (automationData.matchAnyWord === true) automationData.keywords = [];
@@ -513,10 +619,6 @@ export async function PATCH(request: NextRequest) {
   if (automationData.requireFollow === false) {
     automationData.followPromptMessage = null;
     automationData.followPromptButtonLabel = null;
-  }
-  if (automationData.followUpEnabled === false) {
-    automationData.followUpMessage = null;
-    automationData.followUpDelayMinutes = 0;
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {
@@ -540,6 +642,30 @@ export async function PATCH(request: NextRequest) {
     where: { id: automationId },
     data: automationData,
   });
+
+  // A sequência é substituída inteira quando vem no corpo: reordenar ou remover
+  // um passo do meio não tem representação incremental honesta, e o número de
+  // passos é pequeno. `undefined` significa "não mexe".
+  if (steps !== undefined) {
+    const stepRows = steps
+      .map((step) => ({
+        message: step.message.trim(),
+        delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+      }))
+      .filter((step) => step.message)
+      .map((step, index) => ({ ...step, order: index + 1 }));
+
+    await prisma.$transaction([
+      prisma.automationStep.deleteMany({ where: { automationId } }),
+      ...(stepRows.length > 0
+        ? [
+            prisma.automationStep.createMany({
+              data: stepRows.map((step) => ({ ...step, automationId })),
+            }),
+          ]
+        : []),
+    ]);
+  }
 
   // Update, create, or clear the campaign's primary tracked link when a
   // destination URL was supplied. `undefined` means "leave it alone".
@@ -580,7 +706,7 @@ export async function PATCH(request: NextRequest) {
       orderBy: { createdAt: "asc" },
     });
     const secondaryLink = links[1];
-    const secondaryLabel = secondaryButtonLabel?.trim() || "Open link";
+    const secondaryLabel = secondaryButtonLabel?.trim() || "Abrir link";
 
     if (secondaryDestinationUrl === "") {
       if (secondaryLink) {

@@ -9,7 +9,7 @@ type ReportPageProps = {
 
 function formatDate(date: Date | null) {
   if (!date) return "No sends yet";
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString("pt-BR", {
     month: "short",
     day: "numeric",
     year: "numeric",

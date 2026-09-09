@@ -26,6 +26,7 @@ import {
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
+type SendFrequency = "ONCE_PER_CONTACT" | "ONCE_PER_POST" | "COOLDOWN" | "ALWAYS";
 
 interface LoadedCampaign {
   id: string;
@@ -37,6 +38,8 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -48,9 +51,14 @@ interface LoadedCampaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  steps?: { order: number; message: string; delayMinutes: number }[];
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
+  sendFrequency: SendFrequency | null;
+  resendCooldownHours: number | null;
+  requiredTags?: string[];
+  excludedTags?: string[];
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
@@ -59,6 +67,27 @@ interface LoadedCampaign {
 interface CampaignBuilderProps {
   mode: "new" | "edit";
   campaignId?: string;
+}
+
+/** "cliente, vip" → ["cliente", "vip"], normalizado. */
+function parseTagList(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .split(",")
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+/** "1h30" lê melhor que "90 minutos" ao somar passos. */
+function formatDelay(minutes: number): string {
+  if (minutes <= 0) return "na hora";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h${String(rest).padStart(2, "0")}`;
 }
 
 function Section({
@@ -158,6 +187,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [matchMode, setMatchMode] = useState<MatchMode>("specific");
   const [keywordText, setKeywordText] = useState("");
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
+  const [storyReplyTriggerEnabled, setStoryReplyTriggerEnabled] =
+    useState(false);
+  const [storyMentionTriggerEnabled, setStoryMentionTriggerEnabled] =
+    useState(false);
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
   const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
@@ -169,17 +202,29 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [dmMessage, setDmMessage] = useState("");
   const [linkOpen, setLinkOpen] = useState(false);
   const [trackedDestinationUrl, setTrackedDestinationUrl] = useState("");
-  const [linkButtonLabel, setLinkButtonLabel] = useState("Open link");
+  const [linkButtonLabel, setLinkButtonLabel] = useState("Abrir link");
   const [secondLinkOpen, setSecondLinkOpen] = useState(false);
   const [secondaryDestinationUrl, setSecondaryDestinationUrl] = useState("");
-  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState("Open link");
+  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState("Abrir link");
   const [requireFollow, setRequireFollow] = useState(false);
   const [followPromptMessage, setFollowPromptMessage] = useState("");
   const [followPromptButtonLabel, setFollowPromptButtonLabel] =
-    useState("i'm following");
+    useState("estou te seguindo");
+  // A sequência que sai depois do link. Até 3 passos, cada um com seu atraso
+  // relativo ao anterior.
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
-  const [followUpMessage, setFollowUpMessage] = useState("");
-  const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  const [steps, setSteps] = useState<
+    { message: string; delayMinutes: number }[]
+  >([{ message: "", delayMinutes: 0 }]);
+  // Once per person is the default on purpose: the alternative is re-sending the
+  // same automated message to someone who already has it.
+  const [sendFrequency, setSendFrequency] =
+    useState<SendFrequency>("ONCE_PER_CONTACT");
+  const [resendCooldownHours, setResendCooldownHours] = useState(24);
+  // Condição por tag do contato: o equivalente ao nó de Condição do ManyChat,
+  // mas como configuração em vez de flow.
+  const [requiredTagsText, setRequiredTagsText] = useState("");
+  const [excludedTagsText, setExcludedTagsText] = useState("");
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -187,6 +232,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // of returning to the campaigns list.
   const [importQueue, setImportQueue] = useState<ImportRow[] | null>(null);
   const [importTotal, setImportTotal] = useState(0);
+
+  // A janela de mensagens do Instagram é de 24h contadas da última mensagem da
+  // pessoa, então o que importa é o atraso ACUMULADO, não o de cada passo.
+  const totalStepDelay = useMemo(
+    () =>
+      followUpEnabled
+        ? steps
+            .filter((step) => step.message.trim())
+            .reduce((total, step) => total + step.delayMinutes, 0)
+        : 0,
+    [followUpEnabled, steps]
+  );
 
   const keywords = useMemo(
     () =>
@@ -259,6 +316,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setStoryReplyTriggerEnabled(c.storyReplyTriggerEnabled ?? false);
+        setStoryMentionTriggerEnabled(c.storyMentionTriggerEnabled ?? false);
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
           c.publicReplyMessages?.length
@@ -271,23 +330,46 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setOpeningDmMessage(c.openingDmMessage ?? "");
         setOpeningDmButtonLabel(c.openingDmButtonLabel ?? "");
         setDmMessage(c.dmMessage);
-        setLinkButtonLabel(c.linkButtonLabel ?? "Open link");
+        setLinkButtonLabel(c.linkButtonLabel ?? "Abrir link");
         setIsActive(c.isActive);
         const link = c.trackedLinks?.[0]?.destinationUrl ?? "";
         setTrackedDestinationUrl(link);
         setLinkOpen(Boolean(link));
         const secondLink = c.trackedLinks?.[1];
         setSecondaryDestinationUrl(secondLink?.destinationUrl ?? "");
-        setSecondaryButtonLabel(secondLink?.label ?? "Open link");
+        setSecondaryButtonLabel(secondLink?.label ?? "Abrir link");
         setSecondLinkOpen(Boolean(secondLink?.destinationUrl));
         setRequireFollow(c.requireFollow ?? false);
         setFollowPromptMessage(c.followPromptMessage ?? "");
         setFollowPromptButtonLabel(
-          c.followPromptButtonLabel ?? "i'm following"
+          c.followPromptButtonLabel ?? "estou te seguindo"
         );
-        setFollowUpEnabled(c.followUpEnabled ?? false);
-        setFollowUpMessage(c.followUpMessage ?? "");
-        setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        // A sequência vem de `steps`; o par followUp* é o formato antigo, ainda
+        // lido para uma automação que a migration não tenha convertido.
+        const loadedSteps =
+          c.steps && c.steps.length > 0
+            ? c.steps.map((step) => ({
+                message: step.message,
+                delayMinutes: step.delayMinutes,
+              }))
+            : c.followUpMessage
+              ? [
+                  {
+                    message: c.followUpMessage,
+                    delayMinutes: c.followUpDelayMinutes ?? 0,
+                  },
+                ]
+              : [];
+        setFollowUpEnabled(loadedSteps.length > 0);
+        setSteps(
+          loadedSteps.length > 0
+            ? loadedSteps
+            : [{ message: "", delayMinutes: 0 }]
+        );
+        setSendFrequency(c.sendFrequency ?? "ONCE_PER_CONTACT");
+        setResendCooldownHours(c.resendCooldownHours ?? 24);
+        setRequiredTagsText((c.requiredTags ?? []).join(", "));
+        setExcludedTagsText((c.excludedTags ?? []).join(", "));
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -336,7 +418,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     setOpeningDmEnabled(hasOpening);
     setOpeningDmMessage(row.openingDmMessage ?? "");
     setOpeningDmButtonLabel(
-      row.openingDmButtonLabel || (hasOpening ? "Send link" : "")
+      row.openingDmButtonLabel || (hasOpening ? "Me manda o link" : "")
     );
     const link = row.trackedUrl ?? "";
     setTrackedDestinationUrl(link);
@@ -386,19 +468,29 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   async function handleSubmit(activeValue: boolean) {
     setError(null);
 
-    if (!selectedAccountId) return setError("Connect an Instagram account first.");
-    if (triggerScope === "specific" && !postId)
-      return setError("Pick a post or reel to trigger the campaign.");
+    if (!selectedAccountId) return setError("Conecte uma conta do Instagram primeiro.");
+    // Um gatilho de mensagem (DM, resposta ou menção de story) já basta: nesse
+    // caso não existe post para escolher.
+    const hasMessageTrigger =
+      dmTriggerEnabled || storyReplyTriggerEnabled || storyMentionTriggerEnabled;
+    if (triggerScope === "specific" && !postId && !hasMessageTrigger)
+      return setError(
+        "Escolha o post ou reel que dispara a automação, ou ligue um gatilho de DM ou story."
+      );
     if (matchMode === "specific" && keywords.length === 0)
-      return setError("Add at least one keyword, or switch to any word.");
-    if (!dmMessage.trim()) return setError("Add the DM with the link.");
+      return setError("Adicione pelo menos uma palavra-chave, ou mude para qualquer palavra.");
+    if (!dmMessage.trim()) return setError("Escreva o DM com o link.");
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
-      return setError("Your opening DM needs a message and a button label.");
+      return setError("O DM de abertura precisa de mensagem e de texto no botão.");
+    if (followUpEnabled && totalStepDelay > 1440)
+      return setError(
+        "A soma dos atrasos da sequência passa de 24h, que é a janela de mensagens do Instagram."
+      );
 
     setSaving(true);
 
     const payload = {
-      name: name.trim() || `Campaign for @${username}`,
+      name: name.trim() || `Automação de @${username}`,
       instagramAccountId: selectedAccountId,
       postId: triggerScope === "specific" ? postId : null,
       postUrl: triggerScope === "specific" ? postUrl : null,
@@ -407,6 +499,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      storyReplyTriggerEnabled,
+      storyMentionTriggerEnabled,
       dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
@@ -416,17 +510,26 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
         : [],
       trackedDestinationUrl: trackedDestinationUrl.trim() || "",
-      linkButtonLabel: linkButtonLabel.trim() || "Open link",
+      linkButtonLabel: linkButtonLabel.trim() || "Abrir link",
       secondaryDestinationUrl: secondaryDestinationUrl.trim() || "",
-      secondaryButtonLabel: secondaryButtonLabel.trim() || "Open link",
+      secondaryButtonLabel: secondaryButtonLabel.trim() || "Abrir link",
       requireFollow,
       followPromptMessage: requireFollow ? followPromptMessage.trim() : "",
       followPromptButtonLabel: requireFollow
-        ? followPromptButtonLabel.trim() || "i'm following"
+        ? followPromptButtonLabel.trim() || "estou te seguindo"
         : "",
-      followUpEnabled,
-      followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
-      followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      steps: followUpEnabled
+        ? steps
+            .map((step) => ({
+              message: step.message.trim(),
+              delayMinutes: step.delayMinutes,
+            }))
+            .filter((step) => step.message)
+        : [],
+      sendFrequency,
+      resendCooldownHours,
+      requiredTags: parseTagList(requiredTagsText),
+      excludedTags: parseTagList(excludedTagsText),
       isActive: activeValue,
     };
 
@@ -492,13 +595,13 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setError(
           firstField
             ? `${firstField}: ${fieldErrors[firstField][0]}`
-            : data.error ?? "Failed to save campaign"
+            : data.error ?? "Não foi possível salvar a automação"
         );
         if (typeof window !== "undefined")
           window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
-      setError("Failed to save campaign");
+      setError("Não foi possível salvar a automação");
     } finally {
       setSaving(false);
     }
@@ -539,12 +642,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   if (notFound) {
     return (
       <div className="panel rounded p-8 text-center">
-        <p className="text-sm text-muted">Campaign not found.</p>
+        <p className="text-sm text-muted">Automação não encontrada.</p>
         <button
           onClick={() => router.push("/campaigns")}
           className="mt-4 rounded border border-border px-4 py-2 text-sm text-muted hover:text-foreground"
         >
-          Back to campaigns
+          Voltar para automações
         </button>
       </div>
     );
@@ -555,11 +658,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       {importQueue && (
         <div className="rounded border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
           <span className="font-medium text-foreground">
-            Importing {importTotal - importQueue.length + 1} of {importTotal}.
+            Importando {importTotal - importQueue.length + 1} de {importTotal}.
           </span>{" "}
           <span className="text-muted">
-            Fields are prefilled from your CSV. Pick the reel, edit anything, and
-            save to load the next one — or Skip if you don&rsquo;t want this one.
+            Os campos vieram do seu CSV. Escolha o reel, ajuste o que quiser e
+            salve para carregar o próximo — ou pule se não quiser este.
           </span>
         </div>
       )}
@@ -570,18 +673,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           {mode === "edit" ? (
             <>
               <span className="truncate text-sm font-semibold text-foreground">
-                {name || "Untitled campaign"}
+                {name || "Automação sem nome"}
               </span>
               <span
                 className={`rounded px-2 py-0.5 text-xs font-semibold ${
                   isActive ? "bg-success/15 text-success" : "bg-zinc-500/15 text-muted"
                 }`}
               >
-                {isActive ? "LIVE" : "PAUSED"}
+                {isActive ? "ATIVA" : "PAUSADA"}
               </span>
             </>
           ) : (
-            <span className="text-sm text-muted">New campaign</span>
+            <span className="text-sm text-muted">Nova automação</span>
           )}
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -592,7 +695,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               disabled={saving}
               className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
             >
-              {importQueue.length > 1 ? "Skip" : "Skip & finish"}
+              {importQueue.length > 1 ? "Pular" : "Pular e encerrar"}
             </button>
           )}
           {mode === "edit" &&
@@ -603,7 +706,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 disabled={saving}
                 className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
               >
-                Stop
+                Pausar
               </button>
             ) : (
               <button
@@ -612,7 +715,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 disabled={saving}
                 className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground disabled:opacity-50"
               >
-                Go Live
+                Ativar
               </button>
             ))}
           <button
@@ -621,7 +724,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             disabled={saving}
             className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
           >
-            {saving ? "Saving…" : mode === "new" ? "Go Live" : "Save changes"}
+            {saving ? "Salvando…" : mode === "new" ? "Publicar" : "Salvar alterações"}
           </button>
         </div>
       </div>
@@ -637,13 +740,13 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
         <div className="space-y-3">
           <label className="text-sm font-semibold text-foreground">
-            Campaign name{" "}
-            <span className="font-normal text-muted">(optional)</span>
+            Nome da automação{" "}
+            <span className="font-normal text-muted">(opcional)</span>
           </label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. YC referral"
+            placeholder="ex.: link da bio do reel de terça"
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
             maxLength={100}
           />
@@ -659,18 +762,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   setPostThumb(null);
                 }}
                 includeAll={false}
-                label="Instagram account"
+                label="Conta do Instagram"
               />
             </div>
           )}
         </div>
 
-        <Section title="When someone comments on">
+        <Section title="Quando alguém comentar em">
           <Radio
             checked={triggerScope === "specific"}
             onSelect={() => setTriggerScope("specific")}
           >
-            a specific post or reel
+            um post ou reel específico
           </Radio>
           {triggerScope === "specific" && (
             <div className="rounded-lg border border-border p-2">
@@ -686,44 +789,44 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             checked={triggerScope === "any"}
             onSelect={() => setTriggerScope("any")}
           >
-            any post or reel
+            qualquer post ou reel
           </Radio>
           <Radio
             checked={triggerScope === "next"}
             onSelect={() => setTriggerScope("next")}
           >
-            next post or reel
+            o próximo post ou reel
           </Radio>
         </Section>
 
-        <Section title="And this comment has">
+        <Section title="E o comentário tiver">
           <Radio
             checked={matchMode === "specific"}
             onSelect={() => setMatchMode("specific")}
           >
-            a specific word or words
+            uma palavra específica (ou várias)
           </Radio>
           {matchMode === "specific" && (
             <div className="space-y-1">
               <input
                 value={keywordText}
                 onChange={(e) => setKeywordText(e.target.value)}
-                placeholder="Enter a word or multiple"
+                placeholder="Digite uma palavra ou várias"
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
               />
-              <p className="text-xs text-muted">Use commas to separate words</p>
+              <p className="text-xs text-muted">Separe as palavras por vírgula</p>
             </div>
           )}
           <Radio
             checked={matchMode === "any"}
             onSelect={() => setMatchMode("any")}
           >
-            any word
+            qualquer palavra
           </Radio>
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">
-              also reply when someone DMs{" "}
-              {matchMode === "any" ? "anything" : "these words"}
+              responder também quando mandarem{" "}
+              {matchMode === "any" ? "qualquer DM" : "essas palavras no DM"}
             </span>
             <Toggle
               on={dmTriggerEnabled}
@@ -733,13 +836,50 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           {dmTriggerEnabled && (
             <p className="text-xs text-muted">
               {matchMode === "any"
-                ? "Every DM to this account gets the reply below — use with care."
-                : "A DM containing any of these words gets the same reply, no comment needed."}
+                ? "Todo DM que chegar nesta conta recebe a resposta abaixo — use com cuidado."
+                : "Um DM com qualquer uma dessas palavras recebe a mesma resposta, sem precisar de comentário."}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              responder também quem responder meu story
+            </span>
+            <Toggle
+              on={storyReplyTriggerEnabled}
+              onToggle={() =>
+                setStoryReplyTriggerEnabled(!storyReplyTriggerEnabled)
+              }
+            />
+          </div>
+          {storyReplyTriggerEnabled && (
+            <p className="text-xs text-muted">
+              {matchMode === "any"
+                ? "Qualquer resposta aos seus stories recebe a mensagem abaixo."
+                : "Uma resposta ao story com qualquer uma dessas palavras recebe a mesma mensagem."}{" "}
+              Conta separado por story: em &ldquo;uma vez por pessoa, por
+              post&rdquo;, cada story é um post.
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              responder quem me mencionar no story
+            </span>
+            <Toggle
+              on={storyMentionTriggerEnabled}
+              onToggle={() =>
+                setStoryMentionTriggerEnabled(!storyMentionTriggerEnabled)
+              }
+            />
+          </div>
+          {storyMentionTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Uma menção não tem texto, então palavra-chave não se aplica: toda
+              menção recebe a mensagem. Bom para agradecer quem te marca.
             </p>
           )}
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">
-              reply to their comments under the post
+              responder o comentário publicamente no post
             </span>
             <Toggle
               on={publicReplyEnabled}
@@ -757,7 +897,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                         prev.map((m, idx) => (idx === i ? e.target.value : m))
                       )
                     }
-                    placeholder="Sent you a DM! 📩"
+                    placeholder="Te mandei no direct! 📩"
                     maxLength={1000}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   />
@@ -770,7 +910,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                         )
                       }
                       className="shrink-0 px-2 text-muted hover:text-error"
-                      aria-label="Remove reply"
+                      aria-label="Remover resposta"
                     >
                       ✕
                     </button>
@@ -785,21 +925,21 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   }
                   className="text-xs font-medium text-accent hover:underline"
                 >
-                  + Add another reply
+                  + Adicionar outra variação
                 </button>
               )}
               <p className="text-xs text-muted">
-                One is picked at random each time, so replies don&apos;t look
-                identical.
+                Uma é sorteada a cada vez, para as respostas não ficarem todas
+                iguais.
               </p>
             </div>
           )}
         </Section>
 
-        <Section title="They will get">
+        <Section title="A pessoa recebe">
           <div className="rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground">an opening DM</span>
+              <span className="text-sm text-foreground">um DM de abertura</span>
               <Toggle
                 on={openingDmEnabled}
                 onToggle={() => setOpeningDmEnabled(!openingDmEnabled)}
@@ -810,7 +950,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 <textarea
                   value={openingDmMessage}
                   onChange={(e) => setOpeningDmMessage(e.target.value)}
-                  placeholder="Hey there! I'm so happy you're here 😊"
+                  placeholder="Oi! Que bom que você veio 😊"
                   rows={3}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
@@ -818,7 +958,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 <input
                   value={openingDmButtonLabel}
                   onChange={(e) => setOpeningDmButtonLabel(e.target.value)}
-                  placeholder="Send me the link"
+                  placeholder="Me manda o link"
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   maxLength={64}
                 />
@@ -828,7 +968,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           <div className="mt-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">
-                a follow requirement first
+                exigir que me siga antes
               </span>
               <Toggle
                 on={requireFollow}
@@ -840,7 +980,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 <textarea
                   value={followPromptMessage}
                   onChange={(e) => setFollowPromptMessage(e.target.value)}
-                  placeholder="quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"
+                  placeholder="antes de eu te mandar o link, um favor: me segue aqui. é de graça, não ganho nada com isso. toca no botão quando estiver me seguindo e eu te envio na hora"
                   rows={3}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
@@ -848,27 +988,27 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 <input
                   value={followPromptButtonLabel}
                   onChange={(e) => setFollowPromptButtonLabel(e.target.value)}
-                  placeholder="i'm following"
+                  placeholder="estou te seguindo"
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   maxLength={20}
                 />
                 <p className="text-xs text-muted">
-                  We send the link only after they tap the button and Instagram
-                  confirms the follow. If it can&apos;t be verified, we send it
-                  anyway.
+                  O link só sai depois que a pessoa toca no botão e o Instagram
+                  confirma que ela te segue. Se o Instagram não conseguir
+                  confirmar, mandamos mesmo assim.
                 </p>
               </div>
             )}
           </div>
         </Section>
 
-        <Section title="And then, they will get">
+        <Section title="Depois disso, ela recebe">
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <span className="text-sm text-foreground">a DM with a link</span>
+            <span className="text-sm text-foreground">um DM com o link</span>
             <textarea
               value={dmMessage}
               onChange={(e) => setDmMessage(e.target.value)}
-              placeholder="Write a message"
+              placeholder="Escreva a mensagem"
               rows={3}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
               maxLength={1000}
@@ -879,13 +1019,13 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   value={trackedDestinationUrl}
                   onChange={(e) => setTrackedDestinationUrl(e.target.value)}
                   onBlur={ensureLinkToken}
-                  placeholder="https://yourlink.com/offer"
+                  placeholder="https://seusite.com/oferta"
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                 />
                 <input
                   value={linkButtonLabel}
                   onChange={(e) => setLinkButtonLabel(e.target.value)}
-                  placeholder="Button label (e.g. Open link)"
+                  placeholder="Texto do botão (ex.: Abrir link)"
                   maxLength={20}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                 />
@@ -894,13 +1034,13 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     <input
                       value={secondaryDestinationUrl}
                       onChange={(e) => setSecondaryDestinationUrl(e.target.value)}
-                      placeholder="https://yourlink.com/second"
+                      placeholder="https://seusite.com/segundo"
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     />
                     <input
                       value={secondaryButtonLabel}
                       onChange={(e) => setSecondaryButtonLabel(e.target.value)}
-                      placeholder="Second button label"
+                      placeholder="Texto do segundo botão"
                       maxLength={20}
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     />
@@ -911,7 +1051,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     onClick={() => setSecondLinkOpen(true)}
                     className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
                   >
-                    + Add A Second Link
+                    + Adicionar um segundo link
                   </button>
                 )}
               </div>
@@ -921,17 +1061,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 onClick={() => setLinkOpen(true)}
                 className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
               >
-                + Add A Link
+                + Adicionar um link
               </button>
             )}
             <p className="text-xs text-muted">
-              {"{link}"} inserts the tracked link; {"{username}"} personalizes.
+              {"{link}"} insere o link rastreado; {"{username}"} coloca o @ da
+              pessoa.
             </p>
           </div>
           <div className="mt-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">
-                a follow-up thank-you message
+                uma sequência de mensagens depois
               </span>
               <Toggle
                 on={followUpEnabled}
@@ -939,49 +1080,238 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               />
             </div>
             {followUpEnabled && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={followUpMessage}
-                  onChange={(e) => setFollowUpMessage(e.target.value)}
-                  placeholder="Btw just wanted to say thanks for following me, I appreciate the support 🙌"
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
-                  maxLength={1000}
-                />
-                <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
-                  <span className="text-xs text-muted">Send it</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={1440}
-                    value={followUpDelayMinutes}
-                    onChange={(e) =>
-                      setFollowUpDelayMinutes(
-                        Math.max(0, Math.min(1440, Math.floor(Number(e.target.value) || 0)))
-                      )
+              <div className="mt-3 space-y-3">
+                {steps.map((step, index) => (
+                  <div
+                    key={index}
+                    className="space-y-2 rounded-lg border border-border p-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-muted">
+                        Mensagem {index + 1}
+                      </span>
+                      {steps.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSteps((prev) =>
+                              prev.filter((_, i) => i !== index)
+                            )
+                          }
+                          className="px-1 text-muted hover:text-error"
+                          aria-label={`Remover mensagem ${index + 1}`}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={step.message}
+                      onChange={(e) =>
+                        setSteps((prev) =>
+                          prev.map((sp, i) =>
+                            i === index ? { ...sp, message: e.target.value } : sp
+                          )
+                        )
+                      }
+                      placeholder={
+                        index === 0
+                          ? "conseguiu abrir o link?"
+                          : index === 1
+                            ? "me conta: você já tentou isso antes?"
+                            : "se quiser, te mando o passo a passo completo"
+                      }
+                      rows={2}
+                      className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                      maxLength={1000}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted">
+                        {index === 0 ? "Enviar" : "Depois da anterior, esperar"}
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1440}
+                        value={step.delayMinutes}
+                        onChange={(e) =>
+                          setSteps((prev) =>
+                            prev.map((sp, i) =>
+                              i === index
+                                ? {
+                                    ...sp,
+                                    delayMinutes: Math.max(
+                                      0,
+                                      Math.min(
+                                        1440,
+                                        Math.floor(Number(e.target.value) || 0)
+                                      )
+                                    ),
+                                  }
+                                : sp
+                            )
+                          )
+                        }
+                        className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                      />
+                      <span className="text-xs text-muted">
+                        {index === 0 ? "minutos depois do link" : "minutos"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+
+                {steps.length < 3 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSteps((prev) => [
+                        ...prev,
+                        { message: "", delayMinutes: 60 },
+                      ])
                     }
-                    className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
-                  />
-                  <span className="text-xs text-muted">
-                    minutes after the link
-                  </span>
-                </div>
+                    className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
+                  >
+                    + Adicionar outra mensagem
+                  </button>
+                )}
+
                 <p className="text-xs text-muted">
-                  {followUpDelayMinutes > 0
-                    ? `Sent ${followUpDelayMinutes} min after they tap through.`
-                    : "Sent right after they tap through."}
-                  {" {username}"} personalizes it. Max 24 hours, to stay inside
-                  Instagram&apos;s messaging window.
+                  {"{username}"} coloca o @ da pessoa. A sequência para na hora se
+                  ela pedir para parar.
+                </p>
+                <p
+                  className={`text-xs ${
+                    totalStepDelay > 1440 ? "text-error" : "text-muted"
+                  }`}
+                >
+                  {totalStepDelay > 1440
+                    ? `A soma dos atrasos dá ${formatDelay(totalStepDelay)} e passa das 24h da janela de mensagens do Instagram — as últimas mensagens seriam recusadas.`
+                    : `Última mensagem ${formatDelay(totalStepDelay)} depois do link. A janela do Instagram é de 24h.`}
                 </p>
               </div>
             )}
+          </div>
+        </Section>
+
+        <Section title="Mas só enviar">
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <Radio
+              checked={sendFrequency === "ONCE_PER_CONTACT"}
+              onSelect={() => setSendFrequency("ONCE_PER_CONTACT")}
+            >
+              <span>
+                uma vez por pessoa
+                <span className="ml-1 text-xs text-muted">recomendado</span>
+              </span>
+            </Radio>
+            <Radio
+              checked={sendFrequency === "ONCE_PER_POST"}
+              onSelect={() => setSendFrequency("ONCE_PER_POST")}
+            >
+              uma vez por pessoa, por post
+            </Radio>
+            <Radio
+              checked={sendFrequency === "COOLDOWN"}
+              onSelect={() => setSendFrequency("COOLDOWN")}
+            >
+              de novo, mas não tão cedo
+            </Radio>
+            <Radio
+              checked={sendFrequency === "ALWAYS"}
+              onSelect={() => setSendFrequency("ALWAYS")}
+            >
+              toda vez que der match
+            </Radio>
+
+            {sendFrequency === "COOLDOWN" && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3 text-sm text-foreground">
+                <span className="text-xs text-muted">Esperar pelo menos</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8760}
+                  value={resendCooldownHours}
+                  onChange={(e) =>
+                    setResendCooldownHours(
+                      Math.max(
+                        1,
+                        Math.min(8760, Math.floor(Number(e.target.value) || 1))
+                      )
+                    )
+                  }
+                  className="w-20 rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                />
+                <span className="text-xs text-muted">
+                  horas antes de enviar de novo para a mesma pessoa
+                </span>
+              </div>
+            )}
+
+            <p className="border-t border-border pt-2 text-xs text-muted">
+              {sendFrequency === "ONCE_PER_CONTACT" &&
+                "Quem já recebeu não recebe de novo — nem comentando outra vez, nem mandando DM."}
+              {sendFrequency === "ONCE_PER_POST" &&
+                "Um envio por pessoa em cada post. Se ela comentar em outro post, recebe de novo."}
+              {sendFrequency === "COOLDOWN" &&
+                `Disparos repetidos dentro de ${resendCooldownHours}h ficam registrados e não são enviados.`}
+              {sendFrequency === "ALWAYS" &&
+                "Dispara em todo match. Use só para algo que as pessoas pedem de novo de propósito — senão a mesma pessoa recebe a mesma mensagem sem parar."}
+            </p>
+            <p className="text-xs text-muted">
+              Quem responder &ldquo;parar&rdquo; ou &ldquo;sair&rdquo; é
+              silenciado em todas as automações. Dá para silenciar à mão em
+              Contatos.
+            </p>
+          </div>
+
+          {/* Condição por tag. Fica junto da frequência porque as duas decidem
+              a mesma coisa: se esta pessoa recebe ou não. */}
+          <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
+            <p className="text-sm text-foreground">e só para quem</p>
+            <div className="space-y-1">
+              <label
+                htmlFor="requiredTags"
+                className="text-xs font-semibold text-muted"
+              >
+                tem estas tags
+              </label>
+              <input
+                id="requiredTags"
+                value={requiredTagsText}
+                onChange={(e) => setRequiredTagsText(e.target.value)}
+                placeholder="ex.: lead, interessado"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="excludedTags"
+                className="text-xs font-semibold text-muted"
+              >
+                e não tem estas
+              </label>
+              <input
+                id="excludedTags"
+                value={excludedTagsText}
+                onChange={(e) => setExcludedTagsText(e.target.value)}
+                placeholder="ex.: cliente, ja comprou"
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              />
+            </div>
+            <p className="text-xs text-muted">
+              Separe por vírgula. Vazio não filtra nada. Precisa ter{" "}
+              <strong>todas</strong> as exigidas, e{" "}
+              <strong>nenhuma</strong> das excluídas. As tags saem da tela de
+              Contatos.
+            </p>
           </div>
         </Section>
       </div>
 
       {/* Right: preview */}
       <div>
-        <p className="mb-4 text-sm text-muted">Preview</p>
+        <p className="mb-4 text-sm text-muted">Prévia</p>
         <div className="flex justify-center lg:sticky lg:top-6 lg:block">
           <CampaignPreview
             tab={previewTab}
@@ -999,18 +1329,17 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             openingDmButtonLabel={openingDmButtonLabel}
             revealMessage={dmMessage}
             hasLink={Boolean(trackedDestinationUrl.trim())}
-            linkButtonLabel={linkButtonLabel || "Open link"}
+            linkButtonLabel={linkButtonLabel || "Abrir link"}
             linkUrl={trackedDestinationUrl.trim() || undefined}
             hasSecondLink={
               secondLinkOpen && Boolean(secondaryDestinationUrl.trim())
             }
-            secondLinkButtonLabel={secondaryButtonLabel || "Open link"}
+            secondLinkButtonLabel={secondaryButtonLabel || "Abrir link"}
             requireFollow={requireFollow}
             followPromptMessage={followPromptMessage}
-            followPromptButtonLabel={followPromptButtonLabel || "i'm following"}
+            followPromptButtonLabel={followPromptButtonLabel || "estou te seguindo"}
             followUpEnabled={followUpEnabled}
-            followUpMessage={followUpMessage}
-            followUpDelayMinutes={followUpDelayMinutes}
+            followUpSteps={steps}
           />
         </div>
       </div>

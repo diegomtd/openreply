@@ -31,6 +31,19 @@ const {
     instagramAccount: {
       findUnique: vi.fn(),
     },
+    contact: {
+      upsert: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    contactAutomationState: {
+      findMany: vi.fn(),
+      upsert: vi.fn(),
+    },
+    automationStep: {
+      findFirst: vi.fn(),
+    },
+    $transaction: vi.fn(),
     operationalEvent: {
       create: vi.fn(),
     },
@@ -157,7 +170,16 @@ const mockAutomation = {
   },
   workspace: {
     id: "workspace_123",
+    // Off by default so the per-automation rule is what each test exercises.
+    contactCooldownHours: 0,
+    optOutKeywords: [],
   },
+  sendFrequency: "ONCE_PER_CONTACT",
+  resendCooldownHours: 24,
+  requiredTags: [],
+  excludedTags: [],
+  storyReplyTriggerEnabled: false,
+  storyMentionTriggerEnabled: false,
   trackedLinks: [],
 };
 
@@ -226,8 +248,27 @@ beforeEach(() => {
   mockPrisma.dmLog.upsert.mockResolvedValue({});
   mockPrisma.dmLog.update.mockResolvedValue({});
   mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+    id: "ig_account_row_1",
     workspaceId: "workspace_123",
+    workspace: { contactCooldownHours: 0, optOutKeywords: [] },
   });
+  // A contact nobody has messaged yet: no history, not opted out.
+  mockPrisma.contact.upsert.mockResolvedValue({
+    id: "contact_1",
+    optedOut: false,
+    lastAutomationSentAt: null,
+    username: "commenter_user",
+    tags: [],
+  });
+  mockPrisma.contact.findUnique.mockResolvedValue(null);
+  mockPrisma.contact.update.mockResolvedValue({});
+  mockPrisma.contactAutomationState.findMany.mockResolvedValue([]);
+  mockPrisma.contactAutomationState.upsert.mockResolvedValue({});
+  // Sem sequência configurada, por padrão: nada é agendado depois do link.
+  mockPrisma.automationStep.findFirst.mockResolvedValue(null);
+  mockPrisma.$transaction.mockImplementation(async (ops: unknown) =>
+    Array.isArray(ops) ? Promise.all(ops) : ops
+  );
   mockPrisma.operationalEvent.create.mockResolvedValue({});
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
@@ -289,7 +330,9 @@ describe("DM Worker — Full Pipeline", () => {
       },
       include: {
         instagramAccount: true,
-        workspace: true,
+        workspace: {
+          select: { id: true, contactCooldownHours: true, optOutKeywords: true },
+        },
         trackedLinks: {
           select: {
             slug: true,
@@ -555,7 +598,7 @@ describe("DM Worker — Full Pipeline", () => {
         ...mockAutomation,
         requireFollow: true,
         followPromptMessage: "Follow me first {username}, then tap 👇",
-        followPromptButtonLabel: "I'm following ✅",
+        followPromptButtonLabel: "Estou te seguindo ✅",
         trackedLinks: [
           {
             slug: "abc123",
@@ -576,7 +619,7 @@ describe("DM Worker — Full Pipeline", () => {
       "ig_456",
       "comment_555",
       "Follow me first commenter_user, then tap 👇",
-      "I'm following ✅",
+      "Estou te seguindo ✅",
       "followcheck:auto_789"
     );
     expect(mockSendPrivateReplyWithLinkButton).not.toHaveBeenCalled();
@@ -590,7 +633,7 @@ describe("DM Worker — Full Pipeline", () => {
         ...mockAutomation,
         requireFollow: true,
         followPromptMessage: "Follow me first, then tap 👇",
-        followPromptButtonLabel: "I'm following ✅",
+        followPromptButtonLabel: "Estou te seguindo ✅",
         dmMessage: "Hey {username}! Here is the offer: {link}",
         linkButtonLabel: "Get offer",
         trackedLinks: [
@@ -625,7 +668,7 @@ describe("DM Worker — Full Pipeline", () => {
         openingDmMessage: "Hey {username}, welcome!",
         openingDmButtonLabel: "Get the link",
         requireFollow: true,
-        followPromptButtonLabel: "I'm following ✅",
+        followPromptButtonLabel: "Estou te seguindo ✅",
         trackedLinks: [
           {
             slug: "abc123",
@@ -813,6 +856,291 @@ describe("DM Worker — Full Pipeline", () => {
     expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+  });
+});
+
+describe("DM Worker — message sequence after the link", () => {
+  function createMockStepJob(data: Record<string, unknown> = {}) {
+    return {
+      name: "process-followup",
+      data: {
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        automationId: "auto_789",
+        commenterName: "commenter_user",
+        stepOrder: 1,
+        ...data,
+      },
+      id: "step_job_001",
+      attemptsMade: 0,
+    };
+  }
+
+  /** An automation carrying one step of the sequence, as the worker loads it. */
+  function automationWithStep(
+    step: { order: number; message: string; delayMinutes?: number } | null
+  ) {
+    return {
+      ...mockAutomation,
+      steps: step
+        ? [{ ...step, delayMinutes: step.delayMinutes ?? 0 }]
+        : [],
+    };
+  }
+
+  it("should start the sequence once the link is delivered", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 1,
+      delayMinutes: 10,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ automationId: "auto_789", stepOrder: 1 }),
+      expect.objectContaining({
+        delay: 10 * 60_000,
+        jobId: "step_auto_789_commenter_999_1",
+      })
+    );
+  });
+
+  it("should send a step and then queue the one after it", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 2,
+      delayMinutes: 60,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "e aí, funcionou?"
+    );
+    // The chain walks forward one job at a time rather than being queued up
+    // front, which is what lets an opt-out midway stop the rest.
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ stepOrder: 2 }),
+      expect.objectContaining({ delay: 60 * 60_000 })
+    );
+  });
+
+  it("should send nothing and stop the chain for a contact who opted out", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOut: true });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should not queue the next step when this one failed to send", async () => {
+    // Usually a closed 24-hour window, which rejects every later step too.
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí, funcionou?" })
+    );
+    mockPrisma.automationStep.findFirst.mockResolvedValue({
+      order: 2,
+      delayMinutes: 60,
+    });
+    mockSendDirectMessage.mockRejectedValue(
+      new Error("outside of allowed window")
+    );
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should treat a job with no step order as step 1", async () => {
+    // Jobs already queued when sequences shipped were the single follow-up,
+    // which the migration turned into step 1.
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "obrigado por seguir" })
+    );
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ stepOrder: undefined }));
+
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "obrigado por seguir"
+    );
+  });
+
+  it("should do nothing when the step no longer exists", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(automationWithStep(null));
+
+    const processor = getProcessor();
+    await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should queue nothing after the link when there is no sequence", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.automationStep.findFirst.mockResolvedValue(null);
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+});
+
+describe("DM Worker — story triggers", () => {
+  const storyAutomation = {
+    ...mockAutomation,
+    dmTriggerEnabled: false,
+    storyReplyTriggerEnabled: true,
+    requireFollow: false,
+    followPromptMessage: null,
+    followPromptButtonLabel: null,
+  };
+
+  function createMockStoryJob(data: Record<string, unknown> = {}) {
+    return {
+      name: "process-message",
+      data: {
+        instagramAccountId: "ig_456",
+        messageId: "mid_story",
+        messageText: "quero o LINK",
+        senderId: "commenter_999",
+        trigger: "STORY_REPLY",
+        storyId: "story_1",
+        ...data,
+      },
+      id: "story_job_001",
+      attemptsMade: 0,
+    };
+  }
+
+  beforeEach(() => {
+    mockPrisma.automation.findMany.mockResolvedValue([storyAutomation]);
+  });
+
+  it("should look for story-reply campaigns, not DM campaigns", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob());
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storyReplyTriggerEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should scope frequency to the story it replies to", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob());
+
+    // Scoped like a comment is scoped to its post, so ONCE_PER_POST means once
+    // per story rather than once ever.
+    expect(mockPrisma.contactAutomationState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          contactId_automationId_scopeKey: {
+            contactId: "contact_1",
+            automationId: "auto_789",
+            scopeKey: "story:story_1",
+          },
+        },
+      })
+    );
+  });
+
+  it("should answer a story mention even though it carries no text", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...storyAutomation,
+        storyReplyTriggerEnabled: false,
+        storyMentionTriggerEnabled: true,
+        // Keywords are set and matchAnyWord is off: a mention still matches,
+        // because there is no text for a keyword to be found in.
+        matchAnyWord: false,
+      },
+    ]);
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+
+    const processor = getProcessor();
+    await processor(
+      createMockStoryJob({
+        trigger: "STORY_MENTION",
+        messageText: "",
+        storyId: undefined,
+      })
+    );
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storyMentionTriggerEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should not read a stop word out of a text-less story mention", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...storyAutomation,
+        storyReplyTriggerEnabled: false,
+        storyMentionTriggerEnabled: true,
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(
+      createMockStoryJob({ trigger: "STORY_MENTION", messageText: "" })
+    );
+
+    expect(mockPrisma.contact.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+  });
+
+  it("should still mute someone who replies to a story with a stop word", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob({ messageText: "parar" }));
+
+    expect(mockPrisma.contact.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("should treat a job with no trigger as a plain DM", async () => {
+    // Jobs already queued when this shipped carry no trigger field.
+    const processor = getProcessor();
+    await processor(createMockStoryJob({ trigger: undefined }));
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ dmTriggerEnabled: true }),
       })
     );
   });
@@ -1026,7 +1354,7 @@ describe("DM Worker — DM keyword trigger", () => {
       "ig_456",
       "commenter_999",
       expect.any(String),
-      "I'm following ✅",
+      "Estou te seguindo ✅",
       "followcheck:auto_789"
     );
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
@@ -1063,6 +1391,192 @@ describe("DM Worker — DM keyword trigger", () => {
     expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ status: "SKIPPED_PLAN_LIMIT" }),
+      })
+    );
+  });
+
+  // The reported bug: every inbound message carried a new mid, so the per-message
+  // dedupe never matched and the same person was answered again and again.
+  it("should not re-send to someone who already received this automation", async () => {
+    mockPrisma.contactAutomationState.findMany.mockResolvedValue([
+      {
+        scopeKey: "dm",
+        sentCount: 1,
+        lastSentAt: new Date("2026-09-01T10:00:00.000Z"),
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageId: "mid_second" }));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_ALREADY_SENT",
+          errorMessage: expect.stringContaining("Já enviada para esta pessoa"),
+        }),
+      })
+    );
+  });
+
+  it("should re-send after the cooldown when the campaign allows it", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...dmTriggerAutomation,
+        sendFrequency: "COOLDOWN",
+        resendCooldownHours: 24,
+      },
+    ]);
+    mockPrisma.contactAutomationState.findMany.mockResolvedValue([
+      {
+        scopeKey: "dm",
+        sentCount: 1,
+        lastSentAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageId: "mid_later" }));
+
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should record the delivery against the contact so the next message is blocked", async () => {
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockPrisma.contactAutomationState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          contactId_automationId_scopeKey: {
+            contactId: "contact_1",
+            automationId: "auto_789",
+            scopeKey: "dm",
+          },
+        },
+      })
+    );
+  });
+
+  it("should not record a delivery when Meta rejected the send", async () => {
+    mockSendDirectMessage.mockRejectedValue(new Error("Meta is down"));
+
+    const processor = getProcessor();
+    await expect(processor(createMockMessageJob())).rejects.toThrow(
+      "Meta is down"
+    );
+
+    expect(mockPrisma.contactAutomationState.upsert).not.toHaveBeenCalled();
+  });
+
+  it("should mute the contact and stay silent when they ask to stop", async () => {
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageText: "parar" }));
+
+    expect(mockPrisma.contact.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "contact_1" },
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    // No campaign is even looked up — an opt-out can never trigger a reply.
+    expect(mockPrisma.automation.findMany).not.toHaveBeenCalled();
+  });
+
+  it("should send nothing to an already muted contact", async () => {
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: true,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+      tags: [],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ status: "SKIPPED_OPTED_OUT" }),
+      })
+    );
+  });
+
+  it("should skip an automation whose tag condition the contact fails", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...dmTriggerAutomation, excludedTags: ["cliente"] },
+    ]);
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+      tags: ["cliente"],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    // Decided without touching the history table: a blocked automation costs no
+    // query.
+    expect(mockPrisma.contactAutomationState.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_TAG_RULE",
+          errorMessage: expect.stringContaining("cliente"),
+        }),
+      })
+    );
+  });
+
+  it("should send when the contact carries the required tag", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...dmTriggerAutomation, requiredTags: ["lead"] },
+    ]);
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: null,
+      username: "commenter_user",
+      tags: ["lead"],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should hold back a second automation inside the workspace anti-flood window", async () => {
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+      id: "ig_account_row_1",
+      workspaceId: "workspace_123",
+      workspace: { contactCooldownHours: 12, optOutKeywords: [] },
+    });
+    mockPrisma.contact.upsert.mockResolvedValue({
+      id: "contact_1",
+      optedOut: false,
+      lastAutomationSentAt: new Date(Date.now() - 60 * 60 * 1000),
+      username: "commenter_user",
+      tags: [],
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          status: "SKIPPED_COOLDOWN",
+          errorMessage: expect.stringContaining("Outra automação já falou"),
+        }),
       })
     );
   });

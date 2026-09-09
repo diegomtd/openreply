@@ -1,5 +1,7 @@
 "use client";
 
+import { Fragment } from "react";
+
 /* eslint-disable @next/next/no-img-element */
 
 /**
@@ -38,8 +40,8 @@ interface CampaignPreviewProps {
   followPromptMessage: string;
   followPromptButtonLabel: string;
   followUpEnabled: boolean;
-  followUpMessage: string;
-  followUpDelayMinutes?: number;
+  /** A sequência que sai depois do link, na ordem. */
+  followUpSteps?: { message: string; delayMinutes: number }[];
 }
 
 const SAMPLE_USER = "username";
@@ -219,10 +221,10 @@ function PostScreen({
         <p className="line-clamp-2">
           <span className="font-semibold">{username}</span>{" "}
           <span className="text-zinc-200">
-            {caption || "Applications close rly soon!!"}
+            {caption || "as inscrições fecham já já!!"}
           </span>
         </p>
-        <p className="mt-1 text-zinc-500">View all comments</p>
+        <p className="mt-1 text-zinc-500">Ver todos os comentários</p>
       </div>
       <div className="flex shrink-0 items-center justify-around border-t border-zinc-800 px-2 py-3 text-white">
         {Ico.home("h-6 w-6")}
@@ -318,8 +320,7 @@ function DmScreen({
   followPromptMessage,
   followPromptButtonLabel,
   followUpEnabled,
-  followUpMessage,
-  followUpDelayMinutes = 0,
+  followUpSteps = [],
   linkUrl,
   inboundMessage,
 }: {
@@ -338,8 +339,8 @@ function DmScreen({
   followPromptMessage: string;
   followPromptButtonLabel: string;
   followUpEnabled: boolean;
-  followUpMessage: string;
-  followUpDelayMinutes?: number;
+  /** A sequência que sai depois do link, na ordem. */
+  followUpSteps?: { message: string; delayMinutes: number }[];
   // Present on the keyword-trigger thread: the DM the user sends to start it.
   inboundMessage?: string;
 }) {
@@ -360,7 +361,7 @@ function DmScreen({
         {inboundMessage !== undefined && (
           <div className="flex justify-end">
             <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-              {inboundMessage || "their message"}
+              {inboundMessage || "a mensagem dela"}
             </div>
           </div>
         )}
@@ -369,15 +370,15 @@ function DmScreen({
             <div className="flex items-end gap-2">
               <Avatar url={avatarUrl} size={24} />
               <div className="max-w-[80%] overflow-hidden rounded-2xl rounded-bl-md bg-zinc-800">
-                <p className="whitespace-pre-wrap px-3 py-2 text-sm">{openingDmMessage || "Your opening message…"}</p>
+                <p className="whitespace-pre-wrap px-3 py-2 text-sm">{openingDmMessage || "Sua mensagem de abertura…"}</p>
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                  {openingDmButtonLabel || "Button label"}
+                  {openingDmButtonLabel || "Texto do botão"}
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-                {openingDmButtonLabel || "Button label"}
+                {openingDmButtonLabel || "Texto do botão"}
               </div>
             </div>
           </>
@@ -389,16 +390,16 @@ function DmScreen({
               <div className="max-w-[80%] overflow-hidden rounded-2xl rounded-bl-md bg-zinc-800">
                 <p className="whitespace-pre-wrap px-3 py-2 text-sm">
                   {followPromptMessage ||
-                    "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"}
+                    "antes de eu te mandar o link, um favor: me segue aqui. é de graça, não ganho nada com isso. toca no botão quando estiver me seguindo e eu te envio na hora"}
                 </p>
                 <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                  {followPromptButtonLabel || "i'm following"}
+                  {followPromptButtonLabel || "estou te seguindo"}
                 </div>
               </div>
             </div>
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
-                {followPromptButtonLabel || "i'm following"}
+                {followPromptButtonLabel || "estou te seguindo"}
               </div>
             </div>
           </>
@@ -417,7 +418,7 @@ function DmScreen({
                 {(!showCard || bodyText) && (
                   <p className="whitespace-pre-wrap px-3 py-2 text-sm">
                     {!revealMessage
-                      ? "Write a message"
+                      ? "Escreva a mensagem"
                       : showCard
                         ? bodyText
                         : renderMessage(revealMessage, hasLink, linkUrl)}
@@ -426,11 +427,11 @@ function DmScreen({
                 {showCard && (
                   <>
                     <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                      {linkButtonLabel || "Open link"}
+                      {linkButtonLabel || "Abrir link"}
                     </div>
                     {hasSecondLink && (
                       <div className="mx-1.5 mb-1.5 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
-                        {secondLinkButtonLabel || "Open link"}
+                        {secondLinkButtonLabel || "Abrir link"}
                       </div>
                     )}
                   </>
@@ -439,32 +440,33 @@ function DmScreen({
             </div>
           );
         })()}
-        {followUpEnabled && (
-          <>
-            {followUpDelayMinutes > 0 && (
-              <p className="py-1 text-center text-[11px] text-zinc-500">
-                {followUpDelayMinutes} min later
-              </p>
-            )}
-            <div className="flex items-end gap-2">
-              <Avatar url={avatarUrl} size={24} />
-              <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-zinc-800 px-3 py-2">
-                <p className="whitespace-pre-wrap text-sm">
-                  {followUpMessage.trim()
-                    ? followUpMessage.replace(/\{username\}/g, SAMPLE_USER)
-                    : "Btw just wanted to say thanks for following me, I appreciate the support 🙌"}
+        {followUpEnabled &&
+          followUpSteps.map((step, index) => (
+            <Fragment key={index}>
+              {step.delayMinutes > 0 && (
+                <p className="py-1 text-center text-[11px] text-zinc-500">
+                  {step.delayMinutes} min depois
                 </p>
+              )}
+              <div className="flex items-end gap-2">
+                <Avatar url={avatarUrl} size={24} />
+                <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-zinc-800 px-3 py-2">
+                  <p className="whitespace-pre-wrap text-sm">
+                    {step.message.trim()
+                      ? step.message.replace(/\{username\}/g, SAMPLE_USER)
+                      : "sua próxima mensagem…"}
+                  </p>
+                </div>
               </div>
-            </div>
-          </>
-        )}
+            </Fragment>
+          ))}
       </div>
 
       <div className="flex items-center gap-2 px-3 py-3">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-white">
           {Ico.camera("h-4 w-4")}
         </span>
-        <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">Message…</div>
+        <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">Mensagem…</div>
       </div>
     </div>
   );
@@ -476,10 +478,10 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
   const { tab, onTabChange } = props;
   const tabs: { key: PreviewTab; label: string }[] = [
     { key: "post", label: "Post" },
-    { key: "comments", label: "Comments" },
+    { key: "comments", label: "Comentários" },
     { key: "dm", label: "DM" },
     ...(props.dmTriggerEnabled
-      ? [{ key: "dmTrigger" as const, label: "DM trigger" }]
+      ? [{ key: "dmTrigger" as const, label: "Gatilho no DM" }]
       : []),
   ];
 
@@ -524,8 +526,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
             followUpEnabled={props.followUpEnabled}
-            followUpMessage={props.followUpMessage}
-            followUpDelayMinutes={props.followUpDelayMinutes}
+            followUpSteps={props.followUpSteps}
             linkUrl={props.linkUrl}
           />
         )}
@@ -546,8 +547,7 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
             followUpEnabled={props.followUpEnabled}
-            followUpMessage={props.followUpMessage}
-            followUpDelayMinutes={props.followUpDelayMinutes}
+            followUpSteps={props.followUpSteps}
             linkUrl={props.linkUrl}
             inboundMessage={props.sampleComment}
           />

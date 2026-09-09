@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Permite rodar o CI à mão pela aba Actions ou pela API. Útil neste
+  # repositório porque ele é um fork: o GitHub desabilita workflows em forks até
+  # alguém habilitar, e depois de habilitar não há push novo para disparar.
+  workflow_dispatch:
 
 jobs:
   test:

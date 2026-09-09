@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * Campaigns List Page
+ * Automações
  *
- * Shows all campaigns as cards with toggle and delete.
+ * Lista em cartões, cada um mostrando de uma vez o que dispara, com que
+ * frequência envia e o que já rendeu. Ligar/desligar, duplicar e excluir sem
+ * abrir a automação.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -32,6 +34,13 @@ interface Campaign {
   requireFollow: boolean;
   followPromptMessage: string | null;
   followPromptButtonLabel: string | null;
+  dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
+  requiredTags: string[];
+  excludedTags: string[];
+  sendFrequency: "ONCE_PER_CONTACT" | "ONCE_PER_POST" | "COOLDOWN" | "ALWAYS" | null;
+  resendCooldownHours: number | null;
   isActive: boolean;
   wholeWordMatch: boolean;
   instagramAccountId: string;
@@ -54,12 +63,41 @@ interface Campaign {
   }>;
   analytics: {
     sent: number;
+    read: number;
+    readRate: number;
     skipped: number;
     failed: number;
     clicks: number;
     ctr: number;
     topKeywords: { keyword: string; count: number }[];
   };
+}
+
+/** O que dispara esta automação, em uma frase curta. */
+function triggerLabel(auto: Campaign): string {
+  const onde = auto.matchAnyPost
+    ? "qualquer post"
+    : auto.pendingNextReel
+      ? "o próximo reel"
+      : "um post";
+  const oque = auto.matchAnyWord
+    ? "qualquer comentário"
+    : `comentário com palavra-chave`;
+  return `${oque} em ${onde}`;
+}
+
+/** Com que frequência a mesma pessoa pode receber. */
+function frequencyLabel(auto: Campaign): string {
+  switch (auto.sendFrequency) {
+    case "ONCE_PER_POST":
+      return "1× por pessoa/post";
+    case "COOLDOWN":
+      return `a cada ${auto.resendCooldownHours ?? 24}h`;
+    case "ALWAYS":
+      return "toda vez";
+    default:
+      return "1× por pessoa";
+  }
 }
 
 export default function CampaignsPage() {
@@ -98,7 +136,7 @@ export default function CampaignsPage() {
       const data = await res.json();
       if (data.success) setAutomations(data.data);
     } catch (err) {
-      console.error("Failed to fetch campaigns:", err);
+      console.error("Falha ao carregar as automações:", err);
     } finally {
       setLoading(false);
     }
@@ -208,7 +246,7 @@ export default function CampaignsPage() {
         prev.map((a) => (a.id === id ? { ...a, isActive: !isActive } : a))
       );
     } catch (err) {
-      console.error("Failed to toggle:", err);
+      console.error("Falha ao ligar/desligar:", err);
     }
   }
 
@@ -223,17 +261,21 @@ export default function CampaignsPage() {
         1500
       );
     } catch (err) {
-      console.error("Failed to copy reel URL:", err);
+      console.error("Falha ao copiar o link do reel:", err);
     }
   }
 
   async function deleteAutomation(id: string) {
-    if (!confirm("Delete this campaign? This cannot be undone.")) return;
+    if (
+      !confirm("Excluir esta automação? Não tem como desfazer.")
+    ) {
+      return;
+    }
     try {
       await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
       setAutomations((prev) => prev.filter((a) => a.id !== id));
     } catch (err) {
-      console.error("Failed to delete:", err);
+      console.error("Falha ao excluir:", err);
     }
   }
 
@@ -271,9 +313,9 @@ export default function CampaignsPage() {
       });
       const data = await res.json();
       if (data.success) void fetchAutomations();
-      else console.error("Duplicate failed:", data.error);
+      else console.error("Falha ao duplicar:", data.error);
     } catch (err) {
-      console.error("Failed to duplicate:", err);
+      console.error("Falha ao duplicar:", err);
     }
   }
 
@@ -307,9 +349,9 @@ export default function CampaignsPage() {
           <p className="text-sm text-muted">
             {filtered.length}
             {filtered.length !== automations.length
-              ? ` of ${automations.length}`
+              ? ` de ${automations.length}`
               : ""}{" "}
-            campaign{automations.length !== 1 ? "s" : ""}
+            {automations.length === 1 ? "automação" : "automações"}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -324,13 +366,13 @@ export default function CampaignsPage() {
             href="/campaigns/import"
             className="flex-1 rounded border border-border px-4 py-2 text-center text-sm font-medium text-muted hover:text-foreground sm:flex-none"
           >
-            Import
+            Importar
           </Link>
           <Link
             href="/campaigns/new"
             className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover sm:flex-none"
           >
-            New Campaign
+            Nova automação
           </Link>
         </div>
       </div>
@@ -341,22 +383,28 @@ export default function CampaignsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search campaigns by name, keyword, or message…"
+            placeholder="Buscar por nome, palavra-chave ou mensagem…"
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
           />
           <div className="inline-flex shrink-0 rounded-lg bg-surface p-1">
-            {(["all", "active", "paused"] as const).map((s) => (
+            {(
+              [
+                { value: "all", label: "Todas" },
+                { value: "active", label: "Ativas" },
+                { value: "paused", label: "Pausadas" },
+              ] as const
+            ).map((option) => (
               <button
-                key={s}
+                key={option.value}
                 type="button"
-                onClick={() => setStatusFilter(s)}
-                className={`rounded-md px-3 py-1.5 text-sm capitalize transition-colors ${
-                  statusFilter === s
+                onClick={() => setStatusFilter(option.value)}
+                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  statusFilter === option.value
                     ? "bg-background font-medium text-foreground ring-1 ring-accent/40"
                     : "text-muted hover:text-foreground"
                 }`}
               >
-                {s}
+                {option.label}
               </button>
             ))}
           </div>
@@ -366,15 +414,18 @@ export default function CampaignsPage() {
       {/* Empty state */}
       {automations.length === 0 && (
         <div className="panel rounded p-8 text-center sm:p-12">
-          <h3 className="text-lg font-semibold mb-2">No campaigns yet</h3>
+          <h3 className="text-lg font-semibold mb-2">
+            Nenhuma automação ainda
+          </h3>
           <p className="text-sm text-muted mb-6 max-w-sm mx-auto">
-            Create your first comment-to-DM campaign to turn a post or reel into a measurable conversation flow.
+            Crie a primeira: alguém comenta uma palavra-chave no seu post ou reel
+            e recebe o link no DM, com clique medido.
           </p>
           <Link
             href="/campaigns/new"
             className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
           >
-            Create Campaign
+            Criar automação
           </Link>
         </div>
       )}
@@ -382,7 +433,7 @@ export default function CampaignsPage() {
       {/* No matches for the current filter */}
       {automations.length > 0 && filtered.length === 0 && (
         <div className="panel rounded p-8 text-center text-sm text-muted">
-          No campaigns match your search.
+          Nenhuma automação encontrada com essa busca.
         </div>
       )}
 
@@ -396,8 +447,8 @@ export default function CampaignsPage() {
             onClick={() => router.push(`/campaigns/${auto.id}`)}
             className="panel rounded p-4 hover:border-border-hover transition-all cursor-pointer"
           >
-            {/* Wraps rather than compressing: on a phone the action buttons drop
-                to their own line instead of squeezing the campaign summary. */}
+            {/* Quebra linha em vez de comprimir: no celular os botões descem
+                para a própria linha ao invés de esmagar o resumo. */}
             <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
               {auto.postId && thumbnails[auto.postId] && (
                 videoUrl ? (
@@ -407,13 +458,13 @@ export default function CampaignsPage() {
                       e.stopPropagation();
                       setPlayingVideo({ url: videoUrl, postUrl: auto.postUrl });
                     }}
-                    aria-label="Play reel preview"
+                    aria-label="Ver o reel"
                     className="shrink-0"
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={thumbnails[auto.postId]}
-                      alt="Campaign reel"
+                      alt="Reel da automação"
                       className="w-12 h-12 rounded object-cover border border-border hover:border-border-hover"
                       onError={(e) => {
                         e.currentTarget.style.display = "none";
@@ -431,7 +482,7 @@ export default function CampaignsPage() {
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={thumbnails[auto.postId]}
-                      alt="Campaign post"
+                      alt="Post da automação"
                       className="w-12 h-12 rounded object-cover border border-border"
                       onError={(e) => {
                         e.currentTarget.style.display = "none";
@@ -453,16 +504,16 @@ export default function CampaignsPage() {
                         : "bg-zinc-500/10 text-muted"
                     }`}
                   >
-                    {auto.isActive ? "Active" : "Paused"}
+                    {auto.isActive ? "Ativa" : "Pausada"}
                   </span>
                   {auto.pendingNextReel && (
                     <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-warning">
-                      Waiting for next reel
+                      Esperando o próximo reel
                     </span>
                   )}
                   {auto.requireFollow && (
                     <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                      Follow gate
+                      Exige seguir
                     </span>
                   )}
                   {auto.trackedLinks.length >= 2 && (
@@ -472,7 +523,57 @@ export default function CampaignsPage() {
                   )}
                 </div>
 
-                {/* Keywords */}
+                {/* Gatilho e frequência: o resumo do comportamento, sem abrir */}
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                    {triggerLabel(auto)}
+                  </span>
+                  {auto.dmTriggerEnabled && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                      também no DM
+                    </span>
+                  )}
+                  {auto.storyReplyTriggerEnabled && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                      resposta de story
+                    </span>
+                  )}
+                  {auto.storyMentionTriggerEnabled && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                      menção em story
+                    </span>
+                  )}
+                  {(auto.requiredTags?.length > 0 ||
+                    auto.excludedTags?.length > 0) && (
+                    <span
+                      className="rounded-full border border-border px-2 py-0.5 text-muted"
+                      title={[
+                        auto.requiredTags?.length
+                          ? `só quem tem: ${auto.requiredTags.join(", ")}`
+                          : "",
+                        auto.excludedTags?.length
+                          ? `nunca quem tem: ${auto.excludedTags.join(", ")}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    >
+                      condição de tag
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-full px-2 py-0.5 font-medium ${
+                      auto.sendFrequency === "ALWAYS"
+                        ? "bg-amber-500/10 text-warning"
+                        : "bg-accent/10 text-accent"
+                    }`}
+                    title="Com que frequência a mesma pessoa pode receber esta automação"
+                  >
+                    {frequencyLabel(auto)}
+                  </span>
+                </div>
+
+                {/* Palavras-chave */}
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   {auto.keywords.map((kw) => (
                     <span
@@ -497,20 +598,24 @@ export default function CampaignsPage() {
                 {/* Stats */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-zinc-500">
                   <span className="font-medium text-foreground">
-                    {auto._count.dmLogs} runs
+                    {auto._count.dmLogs} disparos
                   </span>
                   <span>·</span>
                   <span className="font-medium text-foreground">
                     {auto.analytics.ctr}% CTR
                   </span>
                   <span>·</span>
-                  <span>{auto.analytics.sent} sent</span>
+                  <span>{auto.analytics.sent} enviados</span>
                   <span>·</span>
-                  <span>{auto.analytics.skipped} skipped</span>
+                  <span title="Quantos dos envios o Instagram confirmou como lidos">
+                    {auto.analytics.read ?? 0} lidos
+                  </span>
                   <span>·</span>
-                  <span>{auto.analytics.failed} failed</span>
+                  <span>{auto.analytics.skipped} pulados</span>
                   <span>·</span>
-                  <span>{auto.analytics.clicks} clicks</span>
+                  <span>{auto.analytics.failed} falhas</span>
+                  <span>·</span>
+                  <span>{auto.analytics.clicks} cliques</span>
                 </div>
 
                 {auto.analytics.topKeywords.length > 0 && (
@@ -538,7 +643,7 @@ export default function CampaignsPage() {
                     onClick={() => void copyReelUrl(auto)}
                     className="shrink-0 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
                   >
-                    {copiedId === auto.id ? "Copied!" : "Copy URL"}
+                    {copiedId === auto.id ? "Copiado!" : "Copiar link"}
                   </button>
                 )}
                 {/* Toggle */}
@@ -563,7 +668,7 @@ export default function CampaignsPage() {
                     onClick={() =>
                       setMenuOpenId((cur) => (cur === auto.id ? null : auto.id))
                     }
-                    aria-label="More actions"
+                    aria-label="Mais ações"
                     className="px-2 py-1 rounded text-lg leading-none text-muted hover:text-foreground"
                   >
                     ⋯
@@ -579,7 +684,7 @@ export default function CampaignsPage() {
                           onClick={() => void duplicateAutomation(auto)}
                           className="block w-full px-3 py-2 text-left text-sm text-foreground hover:bg-surface-hover"
                         >
-                          Duplicate
+                          Duplicar
                         </button>
                         <button
                           onClick={() => {
@@ -588,7 +693,7 @@ export default function CampaignsPage() {
                           }}
                           className="block w-full px-3 py-2 text-left text-sm text-error hover:bg-surface-hover"
                         >
-                          Delete
+                          Excluir
                         </button>
                       </div>
                     </>
@@ -619,7 +724,7 @@ export default function CampaignsPage() {
                   rel="noreferrer"
                   className="text-zinc-300 hover:text-white"
                 >
-                  Open on Instagram
+                  Abrir no Instagram
                 </a>
               )}
               <button
@@ -627,7 +732,7 @@ export default function CampaignsPage() {
                 onClick={() => setPlayingVideo(null)}
                 className="text-zinc-300 hover:text-white"
               >
-                Close
+                Fechar
               </button>
             </div>
             <video

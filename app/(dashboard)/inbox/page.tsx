@@ -103,10 +103,10 @@ export default function InboxPage() {
           writeCache(convCacheKey(selectedAccountId), data.data.conversations);
           setConvError(null);
         } else if (!silent) {
-          setConvError(data.error ?? "Failed to load conversations");
+          setConvError(data.error ?? "Não foi possível carregar as conversas");
         }
       } catch {
-        if (!silent) setConvError("Failed to load conversations");
+        if (!silent) setConvError("Não foi possível carregar as conversas");
       } finally {
         if (!silent) setConvLoading(false);
       }
@@ -238,12 +238,12 @@ export default function InboxPage() {
         // Roll the optimistic message back and restore the draft so it's not lost.
         setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
         setDraft(text);
-        setSendError(data.error ?? "Failed to send message");
+        setSendError(data.error ?? "Não foi possível enviar a mensagem");
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
       setDraft(text);
-      setSendError("Failed to send message");
+      setSendError("Não foi possível enviar a mensagem");
     } finally {
       setSending(false);
     }
@@ -259,7 +259,7 @@ export default function InboxPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4">
-        <h1 className="text-lg font-semibold text-foreground">Inbox</h1>
+        <h1 className="text-lg font-semibold text-foreground">Caixa de entrada</h1>
         {accounts.length > 1 && (
           <AccountSelect
             accounts={accounts}
@@ -279,15 +279,15 @@ export default function InboxPage() {
           }`}
         >
           <div className="shrink-0 border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
-            Conversations
+            Conversas
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {convLoading ? (
-              <p className="px-4 py-6 text-sm text-muted">Loading…</p>
+              <p className="px-4 py-6 text-sm text-muted">Carregando…</p>
             ) : convError ? (
               <p className="px-4 py-6 text-sm text-error">{convError}</p>
             ) : conversations.length === 0 ? (
-              <p className="px-4 py-6 text-sm text-muted">No conversations yet.</p>
+              <p className="px-4 py-6 text-sm text-muted">Nenhuma conversa ainda.</p>
             ) : (
               conversations.map((c) => {
                 const isActive = c.id === activeId;
@@ -310,7 +310,7 @@ export default function InboxPage() {
                     </div>
                     {c.lastMessage && (
                       <p className="mt-0.5 truncate text-xs text-muted">
-                        {c.lastMessage.fromMe ? "You: " : ""}
+                        {c.lastMessage.fromMe ? "Você: " : ""}
                         {c.lastMessage.text || "(no text)"}
                       </p>
                     )}
@@ -328,7 +328,7 @@ export default function InboxPage() {
         >
           {!active ? (
             <div className="flex flex-1 items-center justify-center p-6 text-sm text-muted">
-              Select a conversation to read and reply.
+              Escolha uma conversa para ler e responder.
             </div>
           ) : (
             <>
@@ -337,20 +337,20 @@ export default function InboxPage() {
                   type="button"
                   onClick={() => setActiveId(null)}
                   className="-ml-1 rounded px-2 py-1 text-muted hover:text-foreground sm:hidden"
-                  aria-label="Back to conversations"
+                  aria-label="Voltar para as conversas"
                 >
-                  Back
+                  Voltar
                 </button>
                 <span className="truncate">
-                  @{active.contact.username ?? "unknown"}
+                  @{active.contact.username ?? "desconhecido"}
                 </span>
               </div>
 
               <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
                 {threadLoading && messages.length === 0 ? (
-                  <p className="text-sm text-muted">Loading…</p>
+                  <p className="text-sm text-muted">Carregando…</p>
                 ) : messages.length === 0 ? (
-                  <p className="text-sm text-muted">No messages.</p>
+                  <p className="text-sm text-muted">Nenhuma mensagem.</p>
                 ) : (
                   messages.map((m) => (
                     <div
@@ -388,7 +388,7 @@ export default function InboxPage() {
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={handleKeyDown}
                     rows={1}
-                    placeholder="Write a reply…  (Enter to send, Shift+Enter for a new line)"
+                    placeholder="Escreva a resposta…  (Enter envia, Shift+Enter pula linha)"
                     className="max-h-32 min-h-[40px] flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   />
                   <button
@@ -397,7 +397,7 @@ export default function InboxPage() {
                     disabled={sending || !draft.trim()}
                     className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
                   >
-                    {sending ? "Sending…" : "Send"}
+                    {sending ? "Enviando…" : "Enviar"}
                   </button>
                 </div>
               </div>

@@ -77,11 +77,11 @@ export default function PostPicker({
           setPosts(data.data);
           writeCache(cacheKey, data.data);
         } else if (!cached.data) {
-          setError(data.error ?? "Failed to load posts");
+          setError(data.error ?? "Não foi possível carregar os posts");
         }
       })
       .catch(() => {
-        if (!cancelled && !cached.data) setError("Failed to load posts");
+        if (!cancelled && !cached.data) setError("Não foi possível carregar os posts");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -114,7 +114,7 @@ export default function PostPicker({
   if (posts.length === 0) {
     return (
       <div className="text-center py-8">
-        <p className="text-sm text-muted">No posts found</p>
+        <p className="text-sm text-muted">Nenhum post encontrado</p>
       </div>
     );
   }
@@ -131,21 +131,21 @@ export default function PostPicker({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your posts by caption…"
+          placeholder="Buscar nos seus posts pela legenda…"
           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
         />
         <span className="shrink-0 text-xs text-muted">{posts.length}</span>
       </div>
       {visible.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted">
-          No posts match &ldquo;{query}&rdquo;
+          Nenhum post com &ldquo;{query}&rdquo;
         </p>
       ) : (
         <>
           {usedPostIds && Object.keys(usedPostIds).length > 0 && (
             <p className="flex items-center gap-1.5 px-1 text-[11px] text-muted">
               <span className="inline-block h-2.5 w-2.5 rounded-sm border border-warning/50" />
-              Already used
+              Já usado em outra automação
             </p>
           )}
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-64 overflow-y-auto p-1">
@@ -167,7 +167,7 @@ export default function PostPicker({
               setHoveredId((cur) => (cur === post.id ? null : cur))
             }
             aria-pressed={isSelected}
-            title={isUsed ? `Already used by "${usedByName}"` : undefined}
+            title={isUsed ? `Já usado na automação "${usedByName}"` : undefined}
             className={`
               relative aspect-square rounded overflow-hidden border-2
               ${
@@ -182,12 +182,12 @@ export default function PostPicker({
             {thumb ? (
               <img
                 src={thumb}
-                alt={post.caption?.slice(0, 50) ?? "Instagram post"}
+                alt={post.caption?.slice(0, 50) ?? "Post do Instagram"}
                 className={`w-full h-full object-cover ${isUsed ? "opacity-75" : ""}`}
               />
             ) : (
               <div className="w-full h-full bg-surface flex items-center justify-center">
-                <span className="text-xs text-muted">No image</span>
+                <span className="text-xs text-muted">Sem imagem</span>
               </div>
             )}
             {showVideo && (
@@ -206,7 +206,7 @@ export default function PostPicker({
             )}
             {isSelected && (
               <span className="absolute bottom-0 inset-x-0 bg-accent text-white text-xs py-1">
-                Selected
+                Selecionado
               </span>
             )}
           </button>
