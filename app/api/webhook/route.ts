@@ -150,7 +150,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Inbound DMs → keyword-triggered autoreply.
+    // Inbound messages → keyword-triggered autoreply. Covers plain DMs, story
+    // replies and story mentions; the event's `trigger` says which.
     for (const event of messageEvents) {
       await queue.add(
         MESSAGE_JOB_NAME,
@@ -159,6 +160,8 @@ export async function POST(request: NextRequest) {
           messageId: event.messageId,
           messageText: event.messageText,
           senderId: event.senderId,
+          trigger: event.trigger,
+          ...(event.storyId ? { storyId: event.storyId } : {}),
         },
         {
           // Message ids can contain characters BullMQ rejects in a job id (":"

@@ -173,6 +173,8 @@ const mockAutomation = {
   },
   sendFrequency: "ONCE_PER_CONTACT",
   resendCooldownHours: 24,
+  storyReplyTriggerEnabled: false,
+  storyMentionTriggerEnabled: false,
   trackedLinks: [],
 };
 
@@ -846,6 +848,144 @@ describe("DM Worker — Full Pipeline", () => {
     expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+  });
+});
+
+describe("DM Worker — story triggers", () => {
+  const storyAutomation = {
+    ...mockAutomation,
+    dmTriggerEnabled: false,
+    storyReplyTriggerEnabled: true,
+    requireFollow: false,
+    followPromptMessage: null,
+    followPromptButtonLabel: null,
+  };
+
+  function createMockStoryJob(data: Record<string, unknown> = {}) {
+    return {
+      name: "process-message",
+      data: {
+        instagramAccountId: "ig_456",
+        messageId: "mid_story",
+        messageText: "quero o LINK",
+        senderId: "commenter_999",
+        trigger: "STORY_REPLY",
+        storyId: "story_1",
+        ...data,
+      },
+      id: "story_job_001",
+      attemptsMade: 0,
+    };
+  }
+
+  beforeEach(() => {
+    mockPrisma.automation.findMany.mockResolvedValue([storyAutomation]);
+  });
+
+  it("should look for story-reply campaigns, not DM campaigns", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob());
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storyReplyTriggerEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should scope frequency to the story it replies to", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob());
+
+    // Scoped like a comment is scoped to its post, so ONCE_PER_POST means once
+    // per story rather than once ever.
+    expect(mockPrisma.contactAutomationState.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          contactId_automationId_scopeKey: {
+            contactId: "contact_1",
+            automationId: "auto_789",
+            scopeKey: "story:story_1",
+          },
+        },
+      })
+    );
+  });
+
+  it("should answer a story mention even though it carries no text", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...storyAutomation,
+        storyReplyTriggerEnabled: false,
+        storyMentionTriggerEnabled: true,
+        // Keywords are set and matchAnyWord is off: a mention still matches,
+        // because there is no text for a keyword to be found in.
+        matchAnyWord: false,
+      },
+    ]);
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+
+    const processor = getProcessor();
+    await processor(
+      createMockStoryJob({
+        trigger: "STORY_MENTION",
+        messageText: "",
+        storyId: undefined,
+      })
+    );
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storyMentionTriggerEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("should not read a stop word out of a text-less story mention", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...storyAutomation,
+        storyReplyTriggerEnabled: false,
+        storyMentionTriggerEnabled: true,
+      },
+    ]);
+
+    const processor = getProcessor();
+    await processor(
+      createMockStoryJob({ trigger: "STORY_MENTION", messageText: "" })
+    );
+
+    expect(mockPrisma.contact.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+  });
+
+  it("should still mute someone who replies to a story with a stop word", async () => {
+    const processor = getProcessor();
+    await processor(createMockStoryJob({ messageText: "parar" }));
+
+    expect(mockPrisma.contact.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ optedOut: true }),
+      })
+    );
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("should treat a job with no trigger as a plain DM", async () => {
+    // Jobs already queued when this shipped carry no trigger field.
+    const processor = getProcessor();
+    await processor(createMockStoryJob({ trigger: undefined }));
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ dmTriggerEnabled: true }),
       })
     );
   });

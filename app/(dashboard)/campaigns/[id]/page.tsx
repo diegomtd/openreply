@@ -23,6 +23,8 @@ interface Campaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -216,6 +218,18 @@ export default function CampaignDetailPage() {
             <p className="text-xs text-muted">
               Responde também quando mandarem{" "}
               {campaign.matchAnyWord ? "qualquer DM" : "essas palavras no DM"}.
+            </p>
+          )}
+          {campaign.storyReplyTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Responde quem responder um story{" "}
+              {campaign.matchAnyWord ? "com qualquer coisa" : "com essas palavras"}.
+            </p>
+          )}
+          {campaign.storyMentionTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Responde quem mencionar a conta no story (menção não tem texto,
+              então toda menção conta).
             </p>
           )}
           {publicReplies.length > 0 && (

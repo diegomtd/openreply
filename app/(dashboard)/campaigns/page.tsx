@@ -35,6 +35,8 @@ interface Campaign {
   followPromptMessage: string | null;
   followPromptButtonLabel: string | null;
   dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
   sendFrequency: "ONCE_PER_CONTACT" | "ONCE_PER_POST" | "COOLDOWN" | "ALWAYS" | null;
   resendCooldownHours: number | null;
   isActive: boolean;
@@ -525,6 +527,16 @@ export default function CampaignsPage() {
                   {auto.dmTriggerEnabled && (
                     <span className="rounded-full border border-border px-2 py-0.5 text-muted">
                       também no DM
+                    </span>
+                  )}
+                  {auto.storyReplyTriggerEnabled && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                      resposta de story
+                    </span>
+                  )}
+                  {auto.storyMentionTriggerEnabled && (
+                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
+                      menção em story
                     </span>
                   )}
                   <span

@@ -103,7 +103,9 @@ Legenda: ✅ existe no OpenReply · 🟡 parcial · ➕ adicionado neste trabalh
 - ✅ Qualquer post (`matchAnyPost`) e "próximo reel" (`pendingNextReel`)
 - ✅ DM recebido com palavra-chave (`dmTriggerEnabled`)
 - ✅ Toque em botão (postback) e fallback por leitura da mensagem
-- ⬜ Resposta/menção em Story · Live comments · novo seguidor · Ref URL · Ads
+- ➕ **Resposta a story com palavra-chave** (`storyReplyTriggerEnabled`)
+- ➕ **Menção em story** (`storyMentionTriggerEnabled`) — sem texto, toda menção conta
+- ⬜ Live comments · novo seguidor · Ref URL · Ads
 
 ### Mensagem
 - ✅ Texto com `{username}`
@@ -217,7 +219,6 @@ gerou este trabalho.
 
 | Prioridade | Item | Por que |
 |---|---|---|
-| P1 | Story reply e menção em Story como gatilho | Maior volume de contato hoje no Instagram |
 | P1 | Sequência de mensagens (2–3 passos com atraso) dentro da janela de 24h | Qualificação em DM converte mais que link seco |
 | P2 | Tags e campos usados como condição | A base já está no `Contact` |
 | P2 | Funil por automação: enviado → lido → clicado | Fecha a conta do ROI |

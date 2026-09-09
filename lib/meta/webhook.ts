@@ -71,16 +71,32 @@ interface WebhookEntry {
       is_echo?: boolean;
       is_deleted?: boolean;
       is_unsupported?: boolean;
-      attachments?: Array<{ type?: string }>;
+      // Uma resposta a story vem como mensagem normal, com o story respondido
+      // aqui. É o único jeito de distinguir de um DM comum.
+      reply_to?: { story?: { id?: string; url?: string }; mid?: string };
+      // Uma menção em story vem sem texto, como anexo do tipo "story_mention".
+      attachments?: Array<{
+        type?: string;
+        payload?: { url?: string };
+      }>;
     };
   }>;
 }
+
+/**
+ * De onde a mensagem veio. Os três chegam pelo mesmo webhook de mensagens, e sem
+ * essa distinção uma resposta a story é indistinguível de um DM qualquer.
+ */
+export type MessageTrigger = "DM" | "STORY_REPLY" | "STORY_MENTION";
 
 export interface WebhookMessageEvent {
   instagramAccountId: string;
   messageId: string;
   messageText: string;
   senderId: string;
+  trigger: MessageTrigger;
+  /** Id do story respondido ou mencionado, quando a Meta informa. */
+  storyId?: string;
 }
 
 export interface WebhookPostbackEvent {
@@ -176,13 +192,19 @@ export function parsePostbackEvents(
 }
 
 /**
- * Parse inbound Instagram DMs out of a webhook payload. These drive the
- * keyword-triggered autoreply: a user messages the account, and a campaign
- * with `dmTriggerEnabled` whose keywords match the text replies to them.
+ * Parse inbound Instagram messages out of a webhook payload. Three different
+ * triggers arrive through this one field, and the worker needs them apart:
+ *
+ * - `DM` — a plain direct message.
+ * - `STORY_REPLY` — a reply to one of the account's stories. Looks exactly like
+ *   a DM except for `message.reply_to.story`.
+ * - `STORY_MENTION` — the account was mentioned in someone's story. Carries no
+ *   text at all, only a `story_mention` attachment, so it is the one case where
+ *   an empty message is still an event worth acting on.
  *
  * Echoes (messages the account itself sent, including our own autoreplies),
- * deletions, and attachment-only messages with no text are dropped here so
- * the worker never sees them — an echo would otherwise let an autoreply
+ * deletions, and text-less messages that are NOT story mentions are dropped
+ * here so the worker never sees them — an echo would otherwise let an autoreply
  * containing its own keyword trigger itself.
  */
 export function parseMessageEvents(
@@ -205,15 +227,32 @@ export function parseMessageEvents(
       const senderId = messaging.sender?.id;
       const accountId = entry.id ?? messaging.recipient?.id;
 
-      if (!text || !messageId || !senderId || !accountId) continue;
+      if (!messageId || !senderId || !accountId) continue;
       // Ignore anything the connected account sent to itself.
       if (senderId === accountId) continue;
+
+      const isStoryMention = (message.attachments ?? []).some(
+        (attachment) => attachment.type === "story_mention"
+      );
+      const repliedStoryId = message.reply_to?.story?.id;
+
+      // A story mention has no text; everything else without text is noise
+      // (a sticker, an unsupported attachment) and cannot match a keyword.
+      if (!text && !isStoryMention) continue;
+
+      const trigger: MessageTrigger = isStoryMention
+        ? "STORY_MENTION"
+        : message.reply_to?.story
+          ? "STORY_REPLY"
+          : "DM";
 
       events.push({
         instagramAccountId: accountId,
         messageId,
-        messageText: text,
+        messageText: text ?? "",
         senderId,
+        trigger,
+        ...(repliedStoryId ? { storyId: repliedStoryId } : {}),
       });
     }
   }

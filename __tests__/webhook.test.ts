@@ -314,8 +314,95 @@ describe("parseMessageEvents", () => {
         messageId: "mid_abc",
         messageText: "send me the LINK please",
         senderId: "user_999",
+        trigger: "DM",
       },
     ]);
+  });
+
+  it("should mark a reply to one of our stories as a story reply", () => {
+    const payload = messagingPayload([
+      {
+        sender: { id: "user_999" },
+        recipient: { id: "ig_456" },
+        message: {
+          mid: "mid_story_reply",
+          text: "quero o LINK",
+          reply_to: { story: { id: "story_1", url: "https://cdn/story.jpg" } },
+        },
+      },
+    ]);
+
+    // Same shape as a DM apart from reply_to.story — which is the only thing
+    // that told them apart, and used to be ignored.
+    expect(parseMessageEvents(payload)).toEqual([
+      {
+        instagramAccountId: "ig_456",
+        messageId: "mid_story_reply",
+        messageText: "quero o LINK",
+        senderId: "user_999",
+        trigger: "STORY_REPLY",
+        storyId: "story_1",
+      },
+    ]);
+  });
+
+  it("should parse a story mention that carries no text at all", () => {
+    const payload = messagingPayload([
+      {
+        sender: { id: "user_999" },
+        recipient: { id: "ig_456" },
+        message: {
+          mid: "mid_mention",
+          attachments: [
+            { type: "story_mention", payload: { url: "https://cdn/m.jpg" } },
+          ],
+        },
+      },
+    ]);
+
+    expect(parseMessageEvents(payload)).toEqual([
+      {
+        instagramAccountId: "ig_456",
+        messageId: "mid_mention",
+        messageText: "",
+        senderId: "user_999",
+        trigger: "STORY_MENTION",
+      },
+    ]);
+  });
+
+  it("should still drop a text-less message that is not a story mention", () => {
+    // A sticker or an unsupported attachment cannot match a keyword, so it is
+    // noise rather than a trigger.
+    const payload = messagingPayload([
+      {
+        sender: { id: "user_999" },
+        recipient: { id: "ig_456" },
+        message: {
+          mid: "mid_sticker",
+          attachments: [{ type: "image" }],
+        },
+      },
+    ]);
+
+    expect(parseMessageEvents(payload)).toEqual([]);
+  });
+
+  it("should still drop an echo of a story reply we sent", () => {
+    const payload = messagingPayload([
+      {
+        sender: { id: "ig_456" },
+        recipient: { id: "user_999" },
+        message: {
+          mid: "mid_echo",
+          text: "here you go",
+          is_echo: true,
+          reply_to: { story: { id: "story_1" } },
+        },
+      },
+    ]);
+
+    expect(parseMessageEvents(payload)).toEqual([]);
   });
 
   it("should ignore echoes of the account's own messages", () => {

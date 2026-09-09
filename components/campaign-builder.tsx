@@ -38,6 +38,8 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyTriggerEnabled: boolean;
+  storyMentionTriggerEnabled: boolean;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -161,6 +163,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [matchMode, setMatchMode] = useState<MatchMode>("specific");
   const [keywordText, setKeywordText] = useState("");
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
+  const [storyReplyTriggerEnabled, setStoryReplyTriggerEnabled] =
+    useState(false);
+  const [storyMentionTriggerEnabled, setStoryMentionTriggerEnabled] =
+    useState(false);
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
   const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
@@ -267,6 +273,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setStoryReplyTriggerEnabled(c.storyReplyTriggerEnabled ?? false);
+        setStoryMentionTriggerEnabled(c.storyMentionTriggerEnabled ?? false);
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
           c.publicReplyMessages?.length
@@ -397,8 +405,14 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     setError(null);
 
     if (!selectedAccountId) return setError("Conecte uma conta do Instagram primeiro.");
-    if (triggerScope === "specific" && !postId)
-      return setError("Escolha o post ou reel que dispara a automação.");
+    // Um gatilho de mensagem (DM, resposta ou menção de story) já basta: nesse
+    // caso não existe post para escolher.
+    const hasMessageTrigger =
+      dmTriggerEnabled || storyReplyTriggerEnabled || storyMentionTriggerEnabled;
+    if (triggerScope === "specific" && !postId && !hasMessageTrigger)
+      return setError(
+        "Escolha o post ou reel que dispara a automação, ou ligue um gatilho de DM ou story."
+      );
     if (matchMode === "specific" && keywords.length === 0)
       return setError("Adicione pelo menos uma palavra-chave, ou mude para qualquer palavra.");
     if (!dmMessage.trim()) return setError("Escreva o DM com o link.");
@@ -417,6 +431,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      storyReplyTriggerEnabled,
+      storyMentionTriggerEnabled,
       dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
@@ -747,6 +763,43 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               {matchMode === "any"
                 ? "Todo DM que chegar nesta conta recebe a resposta abaixo — use com cuidado."
                 : "Um DM com qualquer uma dessas palavras recebe a mesma resposta, sem precisar de comentário."}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              responder também quem responder meu story
+            </span>
+            <Toggle
+              on={storyReplyTriggerEnabled}
+              onToggle={() =>
+                setStoryReplyTriggerEnabled(!storyReplyTriggerEnabled)
+              }
+            />
+          </div>
+          {storyReplyTriggerEnabled && (
+            <p className="text-xs text-muted">
+              {matchMode === "any"
+                ? "Qualquer resposta aos seus stories recebe a mensagem abaixo."
+                : "Uma resposta ao story com qualquer uma dessas palavras recebe a mesma mensagem."}{" "}
+              Conta separado por story: em &ldquo;uma vez por pessoa, por
+              post&rdquo;, cada story é um post.
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              responder quem me mencionar no story
+            </span>
+            <Toggle
+              on={storyMentionTriggerEnabled}
+              onToggle={() =>
+                setStoryMentionTriggerEnabled(!storyMentionTriggerEnabled)
+              }
+            />
+          </div>
+          {storyMentionTriggerEnabled && (
+            <p className="text-xs text-muted">
+              Uma menção não tem texto, então palavra-chave não se aplica: toda
+              menção recebe a mensagem. Bom para agradecer quem te marca.
             </p>
           )}
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">

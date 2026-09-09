@@ -1033,7 +1033,16 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
  * already had this automation is not answered again on every message they send.
  */
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
-  const { instagramAccountId, messageId, messageText, senderId } = job.data;
+  const {
+    instagramAccountId,
+    messageId,
+    messageText,
+    senderId,
+    storyId,
+  } = job.data;
+  // Jobs enqueued before story triggers existed carry no `trigger`; they were
+  // all plain DMs.
+  const trigger = job.data.trigger ?? "DM";
 
   // Resolve the account and its workspace rules once. Everything below needs
   // them, and loading them per automation (as an `include`) was pure waste on a
@@ -1059,8 +1068,12 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 
   // A stop word never gets an automated answer — it silences every automation
   // for this person instead. Checked before any campaign matching so an opt-out
-  // can never itself trigger a reply.
-  if (isOptOutMessage(messageText, account.workspace.optOutKeywords)) {
+  // can never itself trigger a reply. A story mention carries no text, so there
+  // is nothing to check.
+  if (
+    trigger !== "STORY_MENTION" &&
+    isOptOutMessage(messageText, account.workspace.optOutKeywords)
+  ) {
     if (!contact.optedOut) {
       await optOutContact(
         contact.id,
@@ -1073,9 +1086,19 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     return;
   }
 
+  // Which switch makes a campaign eligible depends on where the message came
+  // from. A story reply is not a DM, even though Instagram delivers both through
+  // the same webhook.
+  const triggerFilter =
+    trigger === "STORY_MENTION"
+      ? { storyMentionTriggerEnabled: true }
+      : trigger === "STORY_REPLY"
+        ? { storyReplyTriggerEnabled: true }
+        : { dmTriggerEnabled: true };
+
   const automations = await prisma.automation.findMany({
     where: {
-      dmTriggerEnabled: true,
+      ...triggerFilter,
       isActive: true,
       instagramAccountId: account.id,
     },
@@ -1118,14 +1141,22 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   // the workspace anti-flood cap inside one job.
   let contactState = contact;
 
+  // Frequency scope: a story reply or mention is scoped to that story, the way a
+  // comment is scoped to its post, so ONCE_PER_POST means once per story. Falls
+  // back to the DM scope when Instagram does not name the story.
+  const scopeKey = storyId ? `story:${storyId}` : DM_SCOPE;
+
   for (const automation of automations) {
-    const matchResult = automation.matchAnyWord
-      ? { matched: true, matchedKeyword: null }
-      : matchKeywords(
-          messageText,
-          automation.keywords,
-          automation.wholeWordMatch
-        );
+    // A story mention has no text at all, so keywords cannot apply — every
+    // mention matches. Anything with text goes through the normal matcher.
+    const matchResult =
+      automation.matchAnyWord || trigger === "STORY_MENTION"
+        ? { matched: true, matchedKeyword: null }
+        : matchKeywords(
+            messageText,
+            automation.keywords,
+            automation.wholeWordMatch
+          );
 
     if (!matchResult.matched) continue;
 
@@ -1158,7 +1189,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       instagramAccountId: automation.instagramAccountId,
       commenterId: senderId,
       commenterName: contactState.username,
-      commentText: messageText,
+      commentText:
+        messageText ||
+        (trigger === "STORY_MENTION" ? "(menção em story)" : ""),
       commentId: dedupeId,
       matchedKeyword: matchResult.matchedKeyword,
     };
@@ -1181,7 +1214,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       contact: contactState,
       automation,
       workspaceCooldownHours: account.workspace.contactCooldownHours,
-      scopeKey: DM_SCOPE,
+      scopeKey,
     });
 
     if (!decision.allowed) {
@@ -1251,7 +1284,11 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           automation,
           senderId,
           commenterName,
-          "message trigger"
+          trigger === "STORY_MENTION"
+            ? "story mention trigger"
+            : trigger === "STORY_REPLY"
+              ? "story reply trigger"
+              : "message trigger"
         );
 
         // The link has been delivered, so the appreciation follow-up applies
@@ -1280,7 +1317,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       await recordAutomationSend({
         contactId: contactState.id,
         automationId: automation.id,
-        scopeKey: DM_SCOPE,
+        scopeKey,
       });
       contactState = { ...contactState, lastAutomationSentAt: new Date() };
 

@@ -59,7 +59,7 @@ multi-tenant.
 | Arquivo | Papel |
 |---|---|
 | `app/api/webhook/route.ts` | Recebe webhook da Meta, valida assinatura HMAC, grava `WebhookEvent`, enfileira jobs |
-| `lib/meta/webhook.ts` | Parsers puros: `parseCommentEvents`, `parseMessageEvents`, `parsePostbackEvents`, `parseReadEvents`. **Já filtra `is_echo`/`is_deleted` e mensagens da própria conta.** |
+| `lib/meta/webhook.ts` | Parsers puros: `parseCommentEvents`, `parseMessageEvents`, `parsePostbackEvents`, `parseReadEvents`. **Já filtra `is_echo`/`is_deleted` e mensagens da própria conta.** `parseMessageEvents` classifica em `DM` / `STORY_REPLY` / `STORY_MENTION` — os três chegam pelo mesmo campo `messages`. |
 | `lib/queue/client.ts` | Fila BullMQ, tipos dos jobs, nomes dos jobs |
 | `lib/queue/dm-worker.ts` | **~1300 linhas, o cérebro.** `processComment`, `processMessage`, `processPostback`, `processFollowUp` |
 | `worker/dm-worker.ts` | Processo do worker: heartbeat + polling reconciler |
@@ -110,9 +110,15 @@ User ─ WorkspaceMember ─ Workspace ─ InstagramAccount ─ Automation
                                           └─ FollowerSnapshot
 ```
 
-- **`Automation`** = "campanha". Gatilhos: comentário em post (`postId` /
-  `matchAnyPost`) e/ou DM recebido (`dmTriggerEnabled`). Tem opening DM,
-  follow gate, follow-up, public reply.
+- **`Automation`** = "campanha". Gatilhos, combináveis:
+  - comentário em post (`postId` / `matchAnyPost` / `pendingNextReel`)
+  - DM recebido (`dmTriggerEnabled`)
+  - resposta a story (`storyReplyTriggerEnabled`)
+  - menção em story (`storyMentionTriggerEnabled`)
+
+  Uma automação **só** de mensagem/story não precisa de post — o `refine` da API
+  aceita isso desde os gatilhos de story. Tem opening DM, follow gate,
+  follow-up, public reply.
 - **`DmLog`** = log de cada envio/skip/falha. Chave de dedupe:
   `@@unique([automationId, commentId])`, onde `commentId` é o id do comentário,
   ou `dm:<mid>` (DM recebido), ou `reveal:<igsid>` (toque no botão).
@@ -167,6 +173,35 @@ rules**; mute manual em **Contatos**.
 for criado, ele passa por lá também.
 
 ---
+
+## 5.1 Gatilhos de Story — como funciona
+
+Os três tipos de mensagem chegam pelo **mesmo** webhook (`messages`), então a
+inscrição em `subscribed_fields: ["comments", "messages"]` (em
+`lib/meta/client.ts`) já cobre tudo — não precisa mexer no app da Meta.
+
+Como distinguir, em `parseMessageEvents`:
+
+| Tipo | Como se reconhece | Tem texto? |
+|---|---|---|
+| `DM` | nenhum dos abaixo | sim |
+| `STORY_REPLY` | `message.reply_to.story` presente | sim |
+| `STORY_MENTION` | anexo com `type: "story_mention"` | **não** |
+
+Consequências no worker (`processMessage`):
+
+1. O gatilho decide **quais automações são elegíveis** — nunca vaza entre eles.
+2. Menção em story **não passa pelo matcher de palavra-chave** (não há texto) e
+   **não passa pelo teste de opt-out** (não há palavra para conferir).
+3. Escopo de frequência de story é `story:<id>`, do mesmo jeito que comentário é
+   escopado ao post. Em `ONCE_PER_POST`, **cada story conta como um post**.
+4. Job antigo sem `trigger` é tratado como `DM` (compatibilidade).
+
+**Cuidado na migration `20260909100000_add_story_triggers`:** antes dela, uma
+resposta a story era indistinguível de um DM, então `dmTriggerEnabled` respondia
+as duas coisas. A migration liga `storyReplyTriggerEnabled` onde
+`dmTriggerEnabled` já estava ligado, para **nenhuma automação em produção mudar
+o que responde no deploy**.
 
 ## 6. Decisões de arquitetura (e por quê)
 
@@ -301,7 +336,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Prioridade | Item | Nota |
 |---|---|---|
-| P1 | Story reply / story mention como gatilho | Grande ganho, API já permite |
+| ~~P1~~ | ~~Story reply / story mention como gatilho~~ | **Feito** em 2026-09-09. Ver §5.1. |
 | P1 | Broadcast/sequência dentro da janela de 24h | Precisa respeitar tags de marketing da Meta |
 | P2 | Tags e campos personalizados usados em condição de automação | Base (`Contact.tags`) já existe |
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |
@@ -314,5 +349,6 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Gatilhos de Story: resposta e menção. `parseMessageEvents` passa a classificar em DM / STORY_REPLY / STORY_MENTION; o worker filtra as automações elegíveis por gatilho; escopo de frequência por story. Automação só de mensagem/story não exige mais escolher um post. |
 | 2026-09-08 | Interface traduzida para pt-BR (telas do app, auth e mensagens padrão do DM). Barra lateral com ícones e grupos; Início com atalhos; cartões de automação com selos de gatilho e frequência; Registros com coluna Motivo. Confirmado que este repo é o app em `automacao.conteudos.tech` (o `/api/health` responde com a forma exata de `app/api/health/route.ts`). |
 | 2026-09-08 | Análise ManyChat + concorrentes (`docs/benchmark-manychat.md`). Correção do bug de repetição (Contact/ContactAutomationState/sendFrequency/opt-out). Tela de Contatos. Reestruturação do menu. Otimizações de CPU para a VPS. Criação deste handoff. |

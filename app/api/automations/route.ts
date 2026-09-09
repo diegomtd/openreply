@@ -27,6 +27,8 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
+    storyReplyTriggerEnabled: z.boolean().optional().default(false),
+    storyMentionTriggerEnabled: z.boolean().optional().default(false),
     dmMessage: z.string().min(1).max(1000),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -69,10 +71,22 @@ const createAutomationSchema = z
       .default("ONCE_PER_CONTACT"),
     resendCooldownHours: z.number().int().min(1).max(8760).optional().default(24),
   })
-  // A campaign must target a specific post, any post, or the next reel.
+  // A campaign needs at least one trigger. A post target is only required when
+  // nothing else fires it: an automation that answers DMs, story replies or
+  // story mentions has no post to point at.
   .refine(
-    (d) => d.matchAnyPost || d.pendingNextReel || Boolean(d.postId),
-    { message: "Choose which post(s) trigger the campaign", path: ["postId"] }
+    (d) =>
+      d.matchAnyPost ||
+      d.pendingNextReel ||
+      Boolean(d.postId) ||
+      d.dmTriggerEnabled ||
+      d.storyReplyTriggerEnabled ||
+      d.storyMentionTriggerEnabled,
+    {
+      message:
+        "Escolha um post/reel, ou ligue um gatilho de DM, resposta de story ou menção",
+      path: ["postId"],
+    }
   )
   // And it must match either specific words or any word.
   .refine((d) => d.matchAnyWord || d.keywords.length >= 1, {
@@ -98,6 +112,8 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
+  storyReplyTriggerEnabled: z.boolean().optional(),
+  storyMentionTriggerEnabled: z.boolean().optional(),
   dmMessage: z.string().min(1).max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -407,6 +423,8 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
+      storyReplyTriggerEnabled: parsed.data.storyReplyTriggerEnabled,
+      storyMentionTriggerEnabled: parsed.data.storyMentionTriggerEnabled,
       dmMessage: parsed.data.dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
