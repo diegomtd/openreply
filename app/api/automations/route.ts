@@ -246,10 +246,17 @@ export async function GET(request: NextRequest) {
     })
   );
 
-  const [statusCounts, clickCounts, keywordCounts] = await Promise.all([
+  const [statusCounts, readCounts, clickCounts, keywordCounts] =
+    await Promise.all([
     prisma.dmLog.groupBy({
       by: ["automationId", "status"],
       where: { workspaceId },
+      _count: { _all: true },
+    }),
+    // Quantos dos envios foram lidos. Fecha o funil enviado → lido → clicado.
+    prisma.dmLog.groupBy({
+      by: ["automationId"],
+      where: { workspaceId, status: "SENT", readAt: { not: null } },
       _count: { _all: true },
     }),
     prisma.linkClick.groupBy({
@@ -262,12 +269,13 @@ export async function GET(request: NextRequest) {
       where: { workspaceId, matchedKeyword: { not: null } },
       _count: { _all: true },
     }),
-  ]);
+    ]);
 
   const analytics = new Map<
     string,
     {
       sent: number;
+      read: number;
       skipped: number;
       failed: number;
       clicks: number;
@@ -278,6 +286,7 @@ export async function GET(request: NextRequest) {
   for (const automation of automationsWithReports) {
     analytics.set(automation.id, {
       sent: 0,
+      read: 0,
       skipped: 0,
       failed: 0,
       clicks: 0,
@@ -292,6 +301,11 @@ export async function GET(request: NextRequest) {
     if (row.status === "SENT") item.sent += count;
     if (row.status === "FAILED") item.failed += count;
     if (row.status.startsWith("SKIPPED_")) item.skipped += count;
+  }
+
+  for (const row of readCounts) {
+    const item = analytics.get(row.automationId);
+    if (item) item.read = row._count._all;
   }
 
   for (const row of clickCounts) {
@@ -319,6 +333,7 @@ export async function GET(request: NextRequest) {
     data: automationsWithReports.map((automation) => {
       const item = analytics.get(automation.id) ?? {
         sent: 0,
+        read: 0,
         skipped: 0,
         failed: 0,
         clicks: 0,
@@ -337,6 +352,9 @@ export async function GET(request: NextRequest) {
         analytics: {
           ...item,
           ctr: calculateCtr(item.clicks, item.sent),
+          // Taxa de leitura sobre o que foi entregue. Separa "não abriram" de
+          // "abriram e o link não convenceu", que são problemas opostos.
+          readRate: calculateCtr(item.read, item.sent),
         },
       };
     }),

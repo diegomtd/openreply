@@ -291,6 +291,11 @@ model DmLog {
   status        DmStatus @default(PENDING)
   attempts      Int      @default(0)
   dmSentAt      DateTime?
+  /// Quando a pessoa leu o DM, pelo recibo de leitura da Meta. O recibo é um
+  /// watermark ("li tudo até este instante"), então isto é preenchido por
+  /// varredura: todo envio para este contato anterior ao watermark conta como
+  /// lido. Fica nulo se a Meta não mandar recibo.
+  readAt        DateTime?
   errorMessage  String?
 
   // The public comment reply is delivered independently of the DM, so its
@@ -313,6 +318,7 @@ model DmLog {
   @@index([status])
   @@index([commenterId])
   @@index([automationId, commenterId])
+  @@index([instagramAccountId, commenterId, dmSentAt])
 }
 
 // Every comment the system has seen, from either the webhook or the polling

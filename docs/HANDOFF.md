@@ -67,7 +67,8 @@ multi-tenant.
 | `lib/meta/client.ts` | Chamadas à Graph API (DM, private reply, botões, follow status) |
 | `lib/utils/keyword-matcher.ts` | Match de palavra-chave (whole-word / parcial) |
 | `lib/utils/rate-limiter.ts` | Teto de 750 private replies/hora por conta |
-| `lib/contacts/state.ts` | **Estado por contato: decide se pode enviar (anti-repetição)** |
+| `lib/contacts/state.ts` | **Estado por contato: decide se pode enviar (anti-repetição + condição de tag)** |
+| `lib/contacts/read-receipts.ts` | Varredura de recibo de leitura: preenche `DmLog.readAt` a partir do watermark |
 
 ### Telas (App Router)
 
@@ -123,7 +124,8 @@ User ─ WorkspaceMember ─ Workspace ─ InstagramAccount ─ Automation
 - **`AutomationStep`** = uma mensagem da sequência que sai **depois do link**,
   com ordem e atraso relativo ao passo anterior. Substituiu o trio
   `followUp*`.
-- **`DmLog`** = log de cada envio/skip/falha. Chave de dedupe:
+- **`DmLog`** = log de cada envio/skip/falha, com `readAt` (recibo de leitura,
+  ver §5.4). Chave de dedupe:
   `@@unique([automationId, commentId])`, onde `commentId` é o id do comentário,
   ou `dm:<mid>` (DM recebido), ou `reveal:<igsid>` (toque no botão).
 - **`ProcessedComment`** = set de dedupe compartilhado webhook↔polling.
@@ -268,6 +270,34 @@ Detalhes que importam:
 Caso de uso que motivou: marcar quem já comprou como `cliente` e excluir essa
 tag da automação de captura, para o cliente não receber a isca de novo.
 
+## 5.4 Funil enviado → lido → clicado
+
+O que faltava era o **lido**. Envio já vinha de `DmLog.status = SENT` e clique de
+`LinkClick`; sem leitura não havia como separar dois problemas opostos: "ninguém
+abriu" (gatilho errado, ou janela de 24h fechada) de "abriram e o link não
+convenceu" (mensagem ruim).
+
+**A Meta não diz "esta mensagem foi lida".** Ela manda um **watermark**: "este
+usuário leu tudo o que você mandou até este instante". Então
+`markDmLogsRead()` (`lib/contacts/read-receipts.ts`) é uma **varredura**, não um
+update pontual: marca todo `DmLog` daquela conta, para aquele contato, com
+`dmSentAt <= watermark`.
+
+Cuidados embutidos:
+
+1. Só toca linhas com `readAt = null`. Quem reabre a conversa dez vezes não gera
+   dez escritas, e a primeira hora de leitura não é sobrescrita por uma depois.
+2. Índice `DmLog(instagramAccountId, commenterId, dmSentAt)` existe exatamente
+   para esse filtro.
+3. É best-effort no webhook, com `.catch()`: recibo perdido só deixa a taxa
+   menor que a real, e nunca derruba o processamento.
+
+**Limite honesto que a UI declara:** o Instagram não manda recibo em toda
+conversa. A tela avisa quando há envios e zero leituras, para o número não ser
+lido como "ninguém abriu".
+
+`analytics.readRate` é lido/enviado; `analytics.ctr` é clique/enviado.
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -403,6 +433,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 |---|---|---|
 | ~~P1~~ | ~~Story reply / story mention como gatilho~~ | **Feito** em 2026-09-09. Ver §5.1. |
 | ~~P2~~ | ~~Tags como condição~~ | **Feito** em 2026-09-09. Ver §5.3. |
+| ~~P2~~ | ~~Funil enviado → lido → clicado~~ | **Feito** em 2026-09-09. Ver §5.4. |
 | ~~P1~~ | ~~Sequência de 2–3 mensagens dentro da janela de 24h~~ | **Feito** em 2026-09-09. Ver §5.2. |
 | P1 | Broadcast (disparo para a base) | Precisa respeitar as tags de marketing da Meta |
 | ~~P2~~ | ~~Tags usadas em condição de automação~~ | **Feito** em 2026-09-09. Ver §5.3. |
@@ -417,6 +448,7 @@ escrito à mão, sem `prisma migrate dev`) e rodar `npm run db:generate`.
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |
 | 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |
 | 2026-09-09 | Sequência de mensagens (`AutomationStep`): até 3 passos depois do link, cadeia que anda um passo por vez, para em opt-out e em falha de envio, com validação da janela de 24h no acumulado. Substituiu o trio `followUp*`, que ficou como legado só de leitura. |
 | 2026-09-09 | Gatilhos de Story: resposta e menção. `parseMessageEvents` passa a classificar em DM / STORY_REPLY / STORY_MENTION; o worker filtra as automações elegíveis por gatilho; escopo de frequência por story. Automação só de mensagem/story não exige mais escolher um post. |

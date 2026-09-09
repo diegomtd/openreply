@@ -137,7 +137,7 @@ Legenda: ✅ existe no OpenReply · 🟡 parcial · ➕ adicionado neste trabalh
 - ✅ Cliques e CTR por link rastreado
 - ✅ Série diária de DMs, top palavras-chave, histórico de seguidores
 - ✅ Relatório compartilhável por slug público
-- ⬜ Funil por automação (enviado → lido → clicado) com taxa em cada passo
+- ➕ **Funil por automação: enviado → lido → clicado**, com taxa em cada passo
 
 ### Operação
 - ✅ Logs de DM com motivo de falha
@@ -223,7 +223,6 @@ gerou este trabalho.
 
 | Prioridade | Item | Por que |
 |---|---|---|
-| P2 | Funil por automação: enviado → lido → clicado | Fecha a conta do ROI |
 | P3 | Editor de mensagem em blocos | Antes de qualquer canvas |
 | P3 | Canvas visual | Só se aparecer necessidade real de ramificação |
 

@@ -9,6 +9,7 @@ import {
   verifyWebhookSignature,
 } from "@/lib/meta/webhook";
 import { MESSAGE_JOB_NAME, POSTBACK_JOB_NAME } from "@/lib/queue/client";
+import { markDmLogsRead } from "@/lib/contacts/read-receipts";
 import { Prisma } from "@/app/generated/prisma/client";
 
 const OPENING_DM_READ_FALLBACK_DELAY_MS = 5 * 60 * 1000;
@@ -179,6 +180,20 @@ export async function POST(request: NextRequest) {
     // same next-step DM after five minutes. The worker no-ops this delayed job
     // if a real button tap has already delivered the reveal.
     for (const event of readEvents) {
+      // Fecha o funil: o watermark diz que tudo até aquele instante foi lido.
+      // Best-effort — um recibo perdido só deixa a taxa de leitura menor que a
+      // real, e nunca deve derrubar o processamento do webhook.
+      await markDmLogsRead({
+        instagramAccountId: event.instagramAccountId,
+        igsid: event.userId,
+        watermark: event.watermark,
+      }).catch((error) => {
+        console.error(
+          "[Webhook] Falha ao marcar leitura:",
+          error instanceof Error ? error.message : error
+        );
+      });
+
       const openingLogs = await prisma.dmLog.findMany({
         where: {
           commenterId: event.userId,

@@ -50,6 +50,8 @@ interface Campaign {
   }[];
   analytics: {
     sent: number;
+    read: number;
+    readRate: number;
     skipped: number;
     failed: number;
     clicks: number;
@@ -182,9 +184,30 @@ export default function CampaignDetailPage() {
 
   const metrics = [
     { label: "Envios", value: campaign.analytics.sent },
+    { label: "Lidos", value: campaign.analytics.read ?? 0 },
     { label: "Cliques", value: campaign.analytics.clicks },
-    { label: "CTR", value: `${campaign.analytics.ctr}%` },
     { label: "Falhas", value: campaign.analytics.failed },
+  ];
+
+  // Funil enviado → lido → clicado. É o que diz ONDE a automação perde: se
+  // ninguém lê, o problema é o gatilho ou a janela de 24h; se leem e não
+  // clicam, é a mensagem.
+  const funnel = [
+    {
+      label: "Enviado",
+      value: campaign.analytics.sent,
+      rate: campaign.analytics.sent > 0 ? 100 : 0,
+    },
+    {
+      label: "Lido",
+      value: campaign.analytics.read ?? 0,
+      rate: campaign.analytics.readRate ?? 0,
+    },
+    {
+      label: "Clicou",
+      value: campaign.analytics.clicks,
+      rate: campaign.analytics.ctr,
+    },
   ];
 
   return (
@@ -362,15 +385,57 @@ export default function CampaignDetailPage() {
         </div>
 
         {tab === "insights" && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {metrics.map((m) => (
-              <div key={m.label} className="panel rounded p-4">
-                <p className="text-sm text-muted">{m.label}</p>
-                <p className="mt-1 text-2xl font-semibold text-foreground">
-                  {m.value}
-                </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {metrics.map((m) => (
+                <div key={m.label} className="panel rounded p-4">
+                  <p className="text-sm text-muted">{m.label}</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">
+                    {m.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="panel rounded p-4 sm:p-6">
+              <h2 className="text-sm font-semibold text-foreground">Funil</h2>
+              <p className="mt-1 text-xs text-muted">
+                Onde a automação perde gente. Se ninguém lê, o problema é o
+                gatilho ou a janela de 24h do Instagram. Se leem e não clicam, é
+                a mensagem.
+              </p>
+              <div className="mt-5 space-y-3">
+                {funnel.map((step) => (
+                  <div key={step.label} className="space-y-1">
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="text-foreground">{step.label}</span>
+                      <span className="text-muted">
+                        {step.value}
+                        {step.label !== "Enviado" && (
+                          <span className="ml-2 text-xs">{step.rate}%</span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-surface-hover">
+                      <div
+                        className="h-full rounded-full bg-accent"
+                        style={{
+                          width: `${Math.min(100, Math.max(step.value > 0 ? 2 : 0, step.rate))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+              {campaign.analytics.sent > 0 &&
+                (campaign.analytics.read ?? 0) === 0 && (
+                  <p className="mt-4 text-xs text-muted">
+                    Nenhuma leitura registrada ainda. O Instagram só manda recibo
+                    de leitura em algumas conversas, então esta linha pode ficar
+                    em zero mesmo com gente lendo.
+                  </p>
+                )}
+            </div>
           </div>
         )}
 

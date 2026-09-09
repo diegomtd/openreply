@@ -63,6 +63,8 @@ interface Campaign {
   }>;
   analytics: {
     sent: number;
+    read: number;
+    readRate: number;
     skipped: number;
     failed: number;
     clicks: number;
@@ -604,6 +606,10 @@ export default function CampaignsPage() {
                   </span>
                   <span>·</span>
                   <span>{auto.analytics.sent} enviados</span>
+                  <span>·</span>
+                  <span title="Quantos dos envios o Instagram confirmou como lidos">
+                    {auto.analytics.read ?? 0} lidos
+                  </span>
                   <span>·</span>
                   <span>{auto.analytics.skipped} pulados</span>
                   <span>·</span>
