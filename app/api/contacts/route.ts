@@ -79,6 +79,8 @@ export async function GET(request: NextRequest) {
         optedOutReason: true,
         tags: true,
         instagramAccount: { select: { username: true } },
+        /// De onde a pessoa veio: a primeira automação que falou com ela.
+        sourceAutomation: { select: { id: true, name: true } },
         automationStates: {
           orderBy: { lastSentAt: "desc" },
           take: 5,

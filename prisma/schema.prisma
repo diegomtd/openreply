@@ -18,11 +18,11 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts          Account[]
-  sessions          Session[]
-  ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
-  workspaceMembers  WorkspaceMember[]
-  sentInvitations   WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
+  accounts         Account[]
+  sessions         Session[]
+  ownedWorkspaces  Workspace[]           @relation("WorkspaceOwner")
+  workspaceMembers WorkspaceMember[]
+  sentInvitations  WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
 }
 
 model Account {
@@ -79,7 +79,7 @@ model Workspace {
   /// most one automated DM per this many hours, no matter how many campaigns
   /// they match. 0 disables the global cap and leaves frequency entirely to each
   /// automation's own sendFrequency.
-  contactCooldownHours Int @default(12)
+  contactCooldownHours Int      @default(12)
   /// Extra words that opt a contact out of every automation when they DM them.
   /// Merged with the built-in list (stop / parar / sair / cancelar / …).
   optOutKeywords       String[] @default([])
@@ -94,6 +94,7 @@ model Workspace {
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
   contacts          Contact[]
+  broadcasts        Broadcast[]
 
   @@index([ownerId])
 }
@@ -135,23 +136,24 @@ model WorkspaceInvitation {
 }
 
 model InstagramAccount {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   workspaceId       String
-  instagramId       String   @unique
+  instagramId       String    @unique
   username          String
   name              String?
   accessToken       String
   tokenExpiresAt    DateTime?
-  webhookSubscribed Boolean  @default(false)
-  connectedAt       DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  webhookSubscribed Boolean   @default(false)
+  connectedAt       DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  automations Automation[]
-  dmLogs      DmLog[]
-  linkClicks  LinkClick[]
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automations       Automation[]
+  dmLogs            DmLog[]
+  linkClicks        LinkClick[]
   followerSnapshots FollowerSnapshot[]
-  contacts    Contact[]
+  contacts          Contact[]
+  broadcasts        Broadcast[]
 
   @@index([workspaceId])
 }
@@ -177,73 +179,75 @@ model FollowerSnapshot {
 }
 
 model Automation {
-  id                 String   @id @default(cuid())
+  id                 String @id @default(cuid())
   workspaceId        String
   instagramAccountId String
 
-  name           String
-  goal           String?
-  postId         String?
-  postUrl        String?
-  pendingNextReel Boolean @default(false)
-  matchAnyPost   Boolean @default(false)
-  keywords       String[]
-  matchAnyWord   Boolean @default(false)
+  name                       String
+  goal                       String?
+  postId                     String?
+  postUrl                    String?
+  pendingNextReel            Boolean       @default(false)
+  matchAnyPost               Boolean       @default(false)
+  keywords                   String[]
+  matchAnyWord               Boolean       @default(false)
   // Also fire this campaign when someone sends a DM whose text matches the
   // keywords above. Independent of the post trigger — a DM has no media, so
   // postId / matchAnyPost do not apply to it.
-  dmTriggerEnabled Boolean @default(false)
+  dmTriggerEnabled           Boolean       @default(false)
   /// Fire on a reply to one of the account's stories whose text matches the
   /// keywords. A story reply arrives through the same webhook as a DM, so
   /// without this it was indistinguishable from one.
-  storyReplyTriggerEnabled Boolean @default(false)
+  storyReplyTriggerEnabled   Boolean       @default(false)
   /// Fire when someone mentions the account in their story. Carries no text, so
   /// keywords do not apply — every mention matches.
-  storyMentionTriggerEnabled Boolean @default(false)
-  dmMessage      String
-  openingDmEnabled     Boolean @default(false)
-  openingDmMessage     String?
-  openingDmButtonLabel String?
-  linkButtonLabel      String?
-  requireFollow           Boolean @default(false)
-  followPromptMessage     String?
-  followPromptButtonLabel String?
+  storyMentionTriggerEnabled Boolean       @default(false)
+  dmMessage                  String
+  openingDmEnabled           Boolean       @default(false)
+  openingDmMessage           String?
+  openingDmButtonLabel       String?
+  linkButtonLabel            String?
+  requireFollow              Boolean       @default(false)
+  followPromptMessage        String?
+  followPromptButtonLabel    String?
   /// LEGADO — substituído por `steps` (AutomationStep). A migration
   /// `add_automation_steps` copiou estes três campos para um passo de ordem 1, e
   /// o worker só lê `steps` desde então. Mantidos para não perder dado e para um
   /// rollback continuar possível; **não escreva neles em código novo.**
-  followUpEnabled Boolean @default(false)
-  followUpMessage String?
-  followUpDelayMinutes Int @default(0)
-  publicReplyEnabled Boolean @default(false)
-  publicReplyMessage String?
-  publicReplyMessages String[] @default([])
-  isActive       Boolean @default(true)
-  wholeWordMatch Boolean @default(true)
+  followUpEnabled            Boolean       @default(false)
+  followUpMessage            String?
+  followUpDelayMinutes       Int           @default(0)
+  publicReplyEnabled         Boolean       @default(false)
+  publicReplyMessage         String?
+  publicReplyMessages        String[]      @default([])
+  isActive                   Boolean       @default(true)
+  wholeWordMatch             Boolean       @default(true)
   /// How often the same person may receive this automation. Defaults to once
   /// ever, because re-sending the same automated message to someone who already
   /// got it is the single most common way this tool annoys real users.
-  sendFrequency       SendFrequency @default(ONCE_PER_CONTACT)
+  sendFrequency              SendFrequency @default(ONCE_PER_CONTACT)
   /// Only read when sendFrequency is COOLDOWN: hours to wait before the same
   /// person may receive this automation again.
-  resendCooldownHours Int           @default(24)
+  resendCooldownHours        Int           @default(24)
   /// Só envia para quem tem TODAS estas tags. Vazio = sem exigência.
-  requiredTags String[] @default([])
+  requiredTags               String[]      @default([])
   /// Nunca envia para quem tem QUALQUER uma destas tags. Vazio = sem exclusão.
-  excludedTags String[] @default([])
-  reportShareSlug    String? @unique
-  reportShareEnabled Boolean @default(true)
+  excludedTags               String[]      @default([])
+  reportShareSlug            String?       @unique
+  reportShareEnabled         Boolean       @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount         @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
   contactStates    ContactAutomationState[]
   steps            AutomationStep[]
+  sourcedContacts  Contact[]                @relation("ContactSource")
+  broadcasts       Broadcast[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -278,25 +282,25 @@ model AutomationStep {
 }
 
 model DmLog {
-  id                 String     @id @default(cuid())
+  id                 String @id @default(cuid())
   workspaceId        String
   automationId       String
   instagramAccountId String
 
-  commenterId   String
-  commenterName String?
-  commentText   String
-  commentId     String
+  commenterId    String
+  commenterName  String?
+  commentText    String
+  commentId      String
   matchedKeyword String?
-  status        DmStatus @default(PENDING)
-  attempts      Int      @default(0)
-  dmSentAt      DateTime?
+  status         DmStatus  @default(PENDING)
+  attempts       Int       @default(0)
+  dmSentAt       DateTime?
   /// Quando a pessoa leu o DM, pelo recibo de leitura da Meta. O recibo é um
   /// watermark ("li tudo até este instante"), então isto é preenchido por
   /// varredura: todo envio para este contato anterior ao watermark conta como
   /// lido. Fica nulo se a Meta não mandar recibo.
-  readAt        DateTime?
-  errorMessage  String?
+  readAt         DateTime?
+  errorMessage   String?
 
   // The public comment reply is delivered independently of the DM, so its
   // outcome is tracked separately. publicReplySentAt makes it idempotent across
@@ -384,7 +388,7 @@ model LinkClick {
 /// "has this person already had this?" rather than "have I seen this message
 /// id?". Without it, every inbound DM re-triggers the same automation forever.
 model Contact {
-  id                 String   @id @default(cuid())
+  id                 String  @id @default(cuid())
   workspaceId        String
   instagramAccountId String
   /// Instagram-scoped user id from the webhook. Unique per connected account.
@@ -409,17 +413,30 @@ model Contact {
   tags String[] @default([])
   note String?
 
+  /// A automação que trouxe esta pessoa — a primeira que falou com ela.
+  /// Gravada uma vez e nunca sobrescrita: "de onde esse contato veio" é uma
+  /// resposta sobre a origem, não sobre o último toque.
+  sourceAutomationId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
-  automationStates ContactAutomationState[]
+  workspace           Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount    InstagramAccount         @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  automationStates    ContactAutomationState[]
+  /// SetNull, não Cascade: apagar uma automação não pode apagar as pessoas que
+  /// ela trouxe. Perde-se a origem, não o contato.
+  sourceAutomation    Automation?              @relation("ContactSource", fields: [sourceAutomationId], references: [id], onDelete: SetNull)
+  broadcastRecipients BroadcastRecipient[]
 
   @@unique([instagramAccountId, igsid])
   @@index([workspaceId])
   @@index([workspaceId, lastAutomationSentAt])
   @@index([workspaceId, optedOut])
+  /// O índice do Envio ativo: a audiência é sempre "deste workspace, dentro da
+  /// janela, não silenciado".
+  @@index([workspaceId, optedOut, lastInboundAt])
+  @@index([sourceAutomationId])
 }
 
 /// One row per (person, automation, scope) that has actually been delivered.
@@ -444,15 +461,108 @@ model ContactAutomationState {
   @@index([contactId, lastSentAt])
 }
 
+/// Estado de um Envio ativo. Ver `lib/broadcast/window.ts` para por que isto
+/// não é um "disparo para a base": no Instagram só dá para falar com quem
+/// mandou mensagem nas últimas 24h, então a audiência é rolante.
+enum BroadcastStatus {
+  /// Montado, ainda não disparado.
+  DRAFT
+  /// Destinatários enfileirados, envio em andamento.
+  SENDING
+  /// Todos os destinatários resolvidos.
+  DONE
+  /// Interrompido à mão. Os jobs restantes se recusam a enviar.
+  CANCELLED
+}
+
+enum BroadcastRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+  /// A janela fechou entre montar a audiência e chegar a vez desta pessoa.
+  /// Não é erro: é a regra da Meta funcionando.
+  SKIPPED_WINDOW_CLOSED
+  /// Pediu para parar depois que o envio foi montado.
+  SKIPPED_OPTED_OUT
+  /// O envio foi cancelado antes de chegar nesta pessoa.
+  SKIPPED_CANCELLED
+}
+
+model Broadcast {
+  id                 String @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+
+  /// Nome interno, para achar na lista depois.
+  name    String
+  message String
+
+  status BroadcastStatus @default(DRAFT)
+
+  /// Os filtros que montaram a audiência, guardados como foram pedidos. Não dá
+  /// para recalcular depois: a janela de cada pessoa já terá mudado, e o que
+  /// interessa em auditoria é o que foi pedido, não o que sobraria hoje.
+  filterTags               String[] @default([])
+  filterExcludedTags       String[] @default([])
+  filterSourceAutomationId String?
+
+  /// Contagens resolvidas, para a lista não precisar agregar destinatário.
+  totalRecipients Int @default(0)
+  sentCount       Int @default(0)
+  failedCount     Int @default(0)
+  skippedCount    Int @default(0)
+
+  createdById String?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount     @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  sourceAutomation Automation?          @relation(fields: [filterSourceAutomationId], references: [id], onDelete: SetNull)
+  recipients       BroadcastRecipient[]
+
+  @@index([workspaceId, createdAt])
+  @@index([filterSourceAutomationId])
+}
+
+model BroadcastRecipient {
+  id          String @id @default(cuid())
+  broadcastId String
+  contactId   String
+
+  status BroadcastRecipientStatus @default(PENDING)
+  /// Motivo legível quando não foi enviado — mesma ideia da coluna Motivo dos
+  /// Registros: um pulo silencioso é o que esconde problema.
+  reason String?
+
+  /// Quando a janela desta pessoa fechava no momento em que a audiência foi
+  /// montada. Guardado para explicar depois por que ela entrou ou saiu.
+  windowClosesAt DateTime?
+
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  broadcast Broadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  contact   Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  /// Uma pessoa entra uma vez em cada envio. É o que torna o job idempotente:
+  /// um retry do BullMQ não manda a mesma mensagem duas vezes.
+  @@unique([broadcastId, contactId])
+  @@index([broadcastId, status])
+  @@index([contactId])
+}
+
 model WebhookEvent {
-  id          String        @id @default(cuid())
-  workspaceId String?
-  object      String?
-  payload     Json
-  status      WebhookStatus @default(PENDING)
+  id           String        @id @default(cuid())
+  workspaceId  String?
+  object       String?
+  payload      Json
+  status       WebhookStatus @default(PENDING)
   errorMessage String?
-  createdAt   DateTime      @default(now())
-  processedAt DateTime?
+  createdAt    DateTime      @default(now())
+  processedAt  DateTime?
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
@@ -462,13 +572,13 @@ model WebhookEvent {
 }
 
 model OperationalEvent {
-  id          String                @id @default(cuid())
+  id          String                 @id @default(cuid())
   workspaceId String?
   source      OperationalEventSource
-  level       OperationalEventLevel @default(INFO)
+  level       OperationalEventLevel  @default(INFO)
   message     String
   payload     Json?
-  createdAt   DateTime              @default(now())
+  createdAt   DateTime               @default(now())
   resolvedAt  DateTime?
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)

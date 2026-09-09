@@ -5,11 +5,13 @@ import {
   MESSAGE_JOB_NAME,
   POSTBACK_JOB_NAME,
   FOLLOWUP_JOB_NAME,
+  BROADCAST_JOB_NAME,
   type DmQueueJob,
   type ProcessCommentJob,
   type ProcessMessageJob,
   type ProcessPostbackJob,
   type ProcessFollowUpJob,
+  type ProcessBroadcastRecipientJob,
 } from "./client";
 import { prisma } from "@/lib/db/client";
 import type { DmStatus } from "@/app/generated/prisma/client";
@@ -43,6 +45,7 @@ import {
   reserveWorkspaceDMSend,
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
+import { isWindowOpen } from "@/lib/broadcast/window";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -1382,6 +1385,151 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   }
 }
 
+/**
+ * Um destinatário de um Envio ativo.
+ *
+ * A janela é reconferida **aqui**, e não só na hora de montar a audiência: com
+ * o espaçamento entre envios, o último da fila pode chegar bem depois do
+ * primeiro, e a janela dele pode ter fechado nesse meio tempo. Enviar assim
+ * tomaria recusa da Meta e contaria como tentativa fora da política.
+ */
+async function processBroadcastRecipient(
+  job: Job<ProcessBroadcastRecipientJob>
+): Promise<void> {
+  const { broadcastId, recipientId } = job.data;
+
+  const recipient = await prisma.broadcastRecipient.findUnique({
+    where: { id: recipientId },
+    select: {
+      id: true,
+      status: true,
+      broadcast: {
+        select: {
+          id: true,
+          status: true,
+          message: true,
+          instagramAccount: {
+            select: { id: true, instagramId: true, accessToken: true },
+          },
+        },
+      },
+      contact: {
+        select: {
+          id: true,
+          igsid: true,
+          username: true,
+          optedOut: true,
+          lastInboundAt: true,
+        },
+      },
+    },
+  });
+
+  // Já resolvido: um retry do BullMQ depois de um envio bem-sucedido cai aqui, e
+  // reenviar seria mandar a mesma mensagem duas vezes para a mesma pessoa.
+  if (!recipient || recipient.status !== "PENDING") return;
+  if (recipient.broadcast.id !== broadcastId) return;
+
+  const finish = async (
+    status: "SENT" | "FAILED" | "SKIPPED_WINDOW_CLOSED" | "SKIPPED_OPTED_OUT" | "SKIPPED_CANCELLED",
+    reason?: string
+  ) => {
+    const counter =
+      status === "SENT"
+        ? { sentCount: { increment: 1 } }
+        : status === "FAILED"
+          ? { failedCount: { increment: 1 } }
+          : { skippedCount: { increment: 1 } };
+
+    await prisma.$transaction([
+      prisma.broadcastRecipient.update({
+        where: { id: recipient.id },
+        data: {
+          status,
+          reason: reason ?? null,
+          ...(status === "SENT" ? { sentAt: new Date() } : {}),
+        },
+      }),
+      prisma.broadcast.update({
+        where: { id: broadcastId },
+        data: counter,
+      }),
+    ]);
+
+    await closeBroadcastIfDone(broadcastId);
+  };
+
+  if (recipient.broadcast.status === "CANCELLED") {
+    await finish("SKIPPED_CANCELLED", "O envio foi cancelado antes da vez desta pessoa");
+    return;
+  }
+
+  // Pediu para parar depois que a audiência foi montada. O opt-out vale sempre,
+  // e um envio já disparado não é exceção.
+  if (recipient.contact.optedOut) {
+    await finish("SKIPPED_OPTED_OUT", "A pessoa pediu para parar de receber mensagens");
+    return;
+  }
+
+  if (!isWindowOpen(recipient.contact.lastInboundAt)) {
+    await finish(
+      "SKIPPED_WINDOW_CLOSED",
+      "A janela de 24h fechou antes da vez desta pessoa"
+    );
+    return;
+  }
+
+  const account = recipient.broadcast.instagramAccount;
+  if (!account.accessToken) {
+    await finish("FAILED", "A conta do Instagram está sem token");
+    return;
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = decryptToken(account.accessToken);
+  } catch {
+    await finish("FAILED", "Não foi possível ler o token da conta");
+    return;
+  }
+
+  try {
+    await sendDirectMessage(
+      accessToken,
+      account.instagramId,
+      recipient.contact.igsid,
+      renderMessageWithoutLink({
+        message: recipient.broadcast.message,
+        commenterName: recipient.contact.username,
+      })
+    );
+  } catch (error) {
+    await finish("FAILED", formatError(error));
+    return;
+  }
+
+  await finish("SENT");
+}
+
+/**
+ * Fecha o envio quando não sobra ninguém pendente.
+ *
+ * Um `updateMany` condicionado a `status: "SENDING"`, e não um `update` solto:
+ * dois destinatários terminando ao mesmo tempo chamam isto em paralelo, e sem a
+ * condição os dois escreveriam `finishedAt`.
+ */
+async function closeBroadcastIfDone(broadcastId: string): Promise<void> {
+  const pending = await prisma.broadcastRecipient.count({
+    where: { broadcastId, status: "PENDING" },
+  });
+  if (pending > 0) return;
+
+  await prisma.broadcast.updateMany({
+    where: { id: broadcastId, status: "SENDING" },
+    data: { status: "DONE", finishedAt: new Date() },
+  });
+}
+
 async function processJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
@@ -1392,6 +1540,9 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === MESSAGE_JOB_NAME) {
     return processMessage(job as Job<ProcessMessageJob>);
   }
+  if (job.name === BROADCAST_JOB_NAME) {
+    return processBroadcastRecipient(job as Job<ProcessBroadcastRecipientJob>);
+  }
   return processComment(job as Job<ProcessCommentJob>);
 }
 
@@ -1400,7 +1551,12 @@ async function recordWorkerFailure(
   error: Error
 ) {
   try {
-    const instagramAccountId = job?.data.instagramAccountId;
+    // Um job de Envio ativo é endereçado por destinatário, não por conta, então
+    // não carrega `instagramAccountId` — mesmo estreitamento usado no commentId.
+    const instagramAccountId =
+      job && "instagramAccountId" in job.data
+        ? job.data.instagramAccountId
+        : undefined;
     const commentId =
       job && "commentId" in job.data ? job.data.commentId : null;
     const account = instagramAccountId

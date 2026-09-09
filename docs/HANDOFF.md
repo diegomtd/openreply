@@ -298,6 +298,56 @@ lido como "ninguém abriu".
 
 `analytics.readRate` é lido/enviado; `analytics.ctr` é clique/enviado.
 
+## 5.5 Envio ativo (janela de 24h) — como funciona
+
+O que o Instagram **não** permite, confirmado na política oficial da Meta:
+
+- One-Time Notifications: "not available for IG Messaging API".
+- Sponsored Messages: "not available for IG Messaging API".
+- As message tags de marketing do Messenger não existem no Instagram. Desde
+  27/04/2026, `CONFIRMED_EVENT_UPDATE`, `ACCOUNT_UPDATE` e `POST_PURCHASE_UPDATE`
+  respondem erro 100.
+- `HUMAN_AGENT` dá 7 dias, mas é para **humano respondendo à mão**. Em envio
+  automatizado é violação de política e a API bloqueia.
+
+Então "disparo para a base" não existe aqui. O que existe é envio para a
+**audiência rolante**: quem mandou mensagem nas últimas 24h. Quem abre janela é
+DM, resposta a story e menção em story — **comentário não abre**, e é por isso
+que `processComment` não mexe em `lastInboundAt` e `processMessage` mexe.
+
+- `lib/broadcast/window.ts` — a regra das 24h num lugar só: `windowState`,
+  `isWindowOpen`, `windowCutoff`. A tela, a prévia e o worker usam o mesmo corte,
+  senão a contagem mentiria em relação às linhas.
+- `lib/broadcast/audience.ts` — o `where`. O filtro de janela é montado **dentro**
+  da função, não recebido de fora: não pode existir caminho que o desligue.
+- `/api/broadcasts/preview` — devolve `reachable`, `expiringSoon`, `total` e
+  `outOfWindow`. Os quatro juntos de propósito: só o `reachable` pareceria filtro
+  quebrado; com o resto do lado, a regra da Meta fica explicada em vez de
+  escondida.
+- `/api/broadcasts` POST — grava `Broadcast` + `BroadcastRecipient` e enfileira
+  **um job por destinatário**, espaçados por `BROADCAST_SPACING_MS` (1,5s). Um job
+  único varrendo centenas de contatos prenderia o worker de 1 core e morreria
+  inteiro no primeiro soluço da Meta. Teto de 500 por envio.
+- O worker **reconfere a janela na vez de cada pessoa**: com o espaçamento, o
+  último da fila chega bem depois do primeiro e a janela dele pode ter fechado.
+  Pulo vira `SKIPPED_WINDOW_CLOSED` com motivo, nunca silêncio.
+- `@@unique([broadcastId, contactId])` é o que torna o job idempotente: retry do
+  BullMQ não manda a mesma mensagem duas vezes.
+- Só owner/admin dispara. A tela pede confirmação em duas etapas, e a confirmação
+  guarda a **assinatura dos filtros** — mexeu em qualquer coisa, ela expira. Não
+  existe "des-enviar" um DM.
+
+### Origem do contato
+
+`Contact.sourceAutomationId` é a **primeira** automação que de fato falou com a
+pessoa. Gravada em `recordAutomationSend` com `updateMany` condicionado a
+`sourceAutomationId: null` — condição e escrita na mesma instrução, então o
+segundo envio nunca sobrescreve o primeiro e dois envios simultâneos não se
+atropelam. A migration faz backfill com `DISTINCT ON` sobre o `DmLog`, contando
+só `SENT`: uma automação que tentou e falhou não trouxe ninguém.
+
+---
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -501,6 +551,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |
 | 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |
 | 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |
 | 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |

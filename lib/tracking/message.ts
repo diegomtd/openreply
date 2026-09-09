@@ -45,8 +45,7 @@ export function renderMessageWithoutLink({
   message: string;
   commenterName?: string | null;
 }) {
-  return message
-    .replace(/\{username\}/gi, commenterName ?? "there")
+  return replaceUsername(message, commenterName)
     .replace(/\s*\{link\}\s*/gi, " ")
     .trim();
 }
@@ -61,6 +60,21 @@ export function buildTrackedUrl(slug: string, baseUrl?: string) {
   return `${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`;
 }
 
+/**
+ * Troca {username} pelo nome da pessoa.
+ *
+ * Sem nome, o placeholder some junto com o espaço que vinha antes dele, em vez
+ * de virar uma palavra genérica: "Oi {username}, saiu o lote" fica "Oi, saiu o
+ * lote", e "Oi {username}!" fica "Oi!". O fallback anterior era "there", que
+ * além de ser inglês num app em português produzia "Oi there," — e o nome no
+ * Instagram é opcional, então isso não é caso raro.
+ */
+function replaceUsername(message: string, commenterName?: string | null): string {
+  const name = commenterName?.trim();
+  if (name) return message.replace(/\{username\}/gi, name);
+  return message.replace(/\s*\{username\}/gi, "");
+}
+
 export function renderMessageWithTracking({
   message,
   commenterName,
@@ -72,7 +86,7 @@ export function renderMessageWithTracking({
   trackedLinks?: MessageTrackedLink[];
   baseUrl?: string;
 }) {
-  let rendered = message.replace(/\{username\}/gi, commenterName ?? "there");
+  let rendered = replaceUsername(message, commenterName);
   const primaryLink = trackedLinks?.[0];
 
   if (!primaryLink) return rendered;

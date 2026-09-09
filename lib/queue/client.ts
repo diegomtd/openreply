@@ -73,15 +73,41 @@ export interface ProcessMessageJob {
   storyId?: string;
 }
 
+// One person inside one Envio ativo. Deliberately one job per recipient rather
+// than one job for the whole send: on a 1-core VPS a loop over hundreds of
+// contacts inside a single job holds the worker hostage and dies whole on the
+// first Meta hiccup, taking the rest of the send with it.
+//
+// Each job re-checks the 24h window at its own turn, because the window can
+// close between building the audience and reaching this person.
+export interface ProcessBroadcastRecipientJob {
+  broadcastId: string;
+  recipientId: string;
+}
+
 export type DmQueueJob =
   | ProcessCommentJob
   | ProcessPostbackJob
   | ProcessFollowUpJob
-  | ProcessMessageJob;
+  | ProcessMessageJob
+  | ProcessBroadcastRecipientJob;
 
 export const POSTBACK_JOB_NAME = "process-postback";
 export const FOLLOWUP_JOB_NAME = "process-followup";
 export const MESSAGE_JOB_NAME = "process-message";
+export const BROADCAST_JOB_NAME = "process-broadcast-recipient";
+
+/**
+ * Espaçamento entre envios de um mesmo disparo, em milissegundos.
+ *
+ * A Meta tem rate limit e esta VPS tem um core. Mandar 200 mensagens de uma vez
+ * é a forma mais rápida de tomar bloqueio e derrubar o app junto. Configurável
+ * porque o número certo depende do tamanho da conta.
+ */
+export const BROADCAST_SPACING_MS = Math.max(
+  200,
+  Number(process.env.BROADCAST_SPACING_MS ?? 1500)
+);
 
 let dmQueue: Queue<DmQueueJob> | null = null;
 
