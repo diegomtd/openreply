@@ -348,6 +348,60 @@ só `SENT`: uma automação que tentou e falhou não trouxe ninguém.
 
 ---
 
+## 5.6 Token morto — o incidente e a protecao
+
+Em 2026-09-09, das 20:20 as 20:48, a Meta invalidou o token da conta
+(`Error validating access token: The session has been invalidated because the
+user changed their password or Facebook has changed the session for security
+reasons`). O app falhou o tempo todo **em silencio**: seguidoras reais
+comentaram e nao receberam nada.
+
+A causa nao foi o erro em si, foi o app nao ter estado para ele. `TokenExpiredError`
+ja era lancado no erro 190 — e nada era feito com ele. `tokenExpiresAt` nao
+cobre este caso: o token e invalidado **na hora** quando a senha do Instagram
+muda ou a Meta derruba a sessao, muito antes da data de expiracao.
+
+- `InstagramAccount.tokenInvalidAt` / `tokenInvalidReason`.
+- Gravado com `updateMany` condicionado a `tokenInvalidAt: null`: a primeira
+  falha registra o horario, as seguintes nao o empurram. Interessa **desde
+  quando** esta quebrado.
+- `components/dead-account-banner.tsx` no topo de toda tela, **fora da area
+  rolavel** — com o token morto nada funciona, entao o aviso nao pode sair de
+  vista ao rolar.
+- O worker desiste rapido quando a conta esta marcada. Sem isso, cada comentario
+  gastava tres tentativas (5, 15 e 45 min) contra um token que ia recusar as
+  tres, queimando rate limit e CPU.
+- O callback do OAuth limpa o estado ao reconectar.
+- **Rate limit nao marca a conta.** Ele passa sozinho; pedir reconexao por causa
+  dele mandaria a pessoa refazer login a toa.
+- `lib/ui/api-error.ts` traduz o erro cru para o que houve, por que, e o botao
+  que resolve. O mesmo erro aparece em quatro telas e a resposta e a mesma nas
+  quatro.
+
+---
+
+## 5.7 Passada de UI depois do primeiro uso real (2026-09-10)
+
+O que o uso real mostrou, e o que mudou:
+
+- **Automacoes** eram ate seis selos lado a lado (gatilho, DM, story, mencao,
+  condicao, frequencia) mais palavras-chave soltas mais sete metricas separadas
+  por ponto — quinze elementos do mesmo peso. Seis coisas com o mesmo peso viram
+  zero coisas. Agora: uma frase de comportamento, palavras-chave com teto de 4, e
+  numeros so quando dizem algo. **Falha aparece em vermelho** — foi uma pilha de
+  falhas perdida no meio dos pontinhos cinza que deixou o token morto invisivel.
+- **Registros**: o motivo era truncado exatamente onde a informacao comecava,
+  atras de um `title` que ninguem descobre. Agora a linha abre e mostra o
+  comentario, a explicacao humana, o botao de acao quando existe, e a mensagem
+  crua por ultimo.
+- **Inicio**: cada numero leva para a lista que o explica (`/logs?status=...`).
+  A tela de Registros passou a ler `?status` da URL, validado contra a lista
+  conhecida.
+- **Caixa de entrada e Analise** mostravam a string crua da Meta, em ingles.
+  Agora usam `ErrorState`.
+
+---
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -551,6 +605,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |
 | 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |
 | 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |
 | 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |

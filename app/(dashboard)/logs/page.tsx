@@ -7,6 +7,8 @@
  * com o motivo e cada falha com o erro da Meta.
  */
 
+import { Fragment } from "react";
+import { humanizeApiError } from "@/lib/ui/api-error";
 import { useEffect, useState, useCallback } from "react";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import StatusBadge from "@/components/status-badge";
@@ -52,7 +54,28 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<DmLog[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  /** Qual linha esta aberta. O motivo truncado era a informacao mais util da
+   * tela, e ficava escondida atras de um tooltip que ninguem descobre. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  /**
+   * Filtro inicial vindo da URL (`/logs?status=FAILED`).
+   *
+   * É o que faz os números do Início virarem destino: clicar em "Falhas" abre
+   * esta tela já filtrada, em vez de largar a pessoa na lista inteira para
+   * procurar de novo. Lido de `window.location` num inicializador preguiçoso,
+   * e não com `useSearchParams`, para não exigir um limite de Suspense só por
+   * causa de um valor inicial.
+   *
+   * Validado contra a lista conhecida: um `status` inventado na URL volta para
+   * "Tudo" em vez de filtrar por nada e parecer que não há registro nenhum.
+   */
+  const [statusFilter, setStatusFilter] = useState<string>(() => {
+    if (typeof window === "undefined") return "ALL";
+    const requested = new URLSearchParams(window.location.search).get("status");
+    return STATUS_FILTERS.some((option) => option.value === requested)
+      ? (requested as string)
+      : "ALL";
+  });
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [page, setPage] = useState(1);
@@ -175,7 +198,13 @@ export default function LogsPage() {
               )}
               {!loading &&
                 logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-surface-hover/50 transition-colors">
+                  <Fragment key={log.id}>
+                  <tr
+                    onClick={() =>
+                      setExpandedId((cur) => (cur === log.id ? null : log.id))
+                    }
+                    className="cursor-pointer hover:bg-surface-hover/50 transition-colors"
+                  >
                     <td className="px-4 py-4 sm:px-6">
                       <span className="font-medium text-foreground">
                         @{log.commenterName ?? log.commenterId.slice(0, 8)}
@@ -196,8 +225,10 @@ export default function LogsPage() {
                     {/* O motivo é a informação mais útil da tela: "não enviei
                         porque essa pessoa já recebeu em 12/03". */}
                     <td className="max-w-[260px] px-4 py-4 sm:px-6">
-                      <span className="block truncate text-muted" title={log.errorMessage ?? ""}>
-                        {log.errorMessage ?? "—"}
+                      <span className="block truncate text-muted">
+                        {log.errorMessage
+                          ? humanizeApiError(log.errorMessage).title
+                          : "—"}
                       </span>
                     </td>
                     <td className="px-4 py-4 text-muted whitespace-nowrap sm:px-6">
@@ -209,6 +240,58 @@ export default function LogsPage() {
                       })}
                     </td>
                   </tr>
+
+                  {expandedId === log.id && (
+                    <tr className="bg-surface-hover/30">
+                      <td colSpan={7} className="px-4 py-4 sm:px-6">
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                              Comentário
+                            </p>
+                            <p className="mt-1 text-sm text-foreground">
+                              {log.commentText || "—"}
+                            </p>
+                          </div>
+
+                          {log.errorMessage && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                                O que aconteceu
+                              </p>
+                              {(() => {
+                                const friendly = humanizeApiError(log.errorMessage);
+                                return (
+                                  <div className="mt-1 space-y-2">
+                                    <p className="text-sm text-foreground">
+                                      {friendly.detail}
+                                    </p>
+                                    {friendly.action && (
+                                      <a
+                                        href={friendly.action.href}
+                                        onClick={(event) => event.stopPropagation()}
+                                        className="inline-block rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white"
+                                      >
+                                        {friendly.action.label}
+                                      </a>
+                                    )}
+                                    {/* A mensagem crua fica por ultimo: e a que
+                                        menos ajuda a decidir o que fazer, mas e
+                                        a que resolve quando alguem precisa
+                                        investigar de verdade. */}
+                                    <p className="break-words font-mono text-xs text-zinc-500">
+                                      {log.errorMessage}
+                                    </p>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
             </tbody>
           </table>
