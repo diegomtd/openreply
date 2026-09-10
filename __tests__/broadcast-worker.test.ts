@@ -4,7 +4,7 @@ const { mockPrisma, mockSendDirectMessage, mockDecryptToken } = vi.hoisted(() =>
   mockPrisma: {
     broadcastRecipient: { findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
     broadcast: { update: vi.fn(), updateMany: vi.fn() },
-    instagramAccount: { findUnique: vi.fn() },
+    instagramAccount: { findUnique: vi.fn(), updateMany: vi.fn() },
     operationalEvent: { create: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -115,6 +115,7 @@ beforeEach(() => {
   mockPrisma.broadcast.update.mockResolvedValue({});
   mockPrisma.broadcast.updateMany.mockResolvedValue({ count: 1 });
   mockPrisma.$transaction.mockResolvedValue([]);
+  mockPrisma.instagramAccount.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("Envio ativo — um destinatário", () => {
@@ -242,6 +243,39 @@ describe("Envio ativo — um destinatário", () => {
     await processor()(JOB);
 
     expect(mockPrisma.broadcast.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("marca a conta como desconectada quando a Meta recusa o token", async () => {
+    // O incidente real: a Meta invalida a sessao quando a senha do Instagram
+    // muda. Sem esta marcacao, os destinatarios seguintes do mesmo disparo
+    // batiam num token que ia recusar todos igual, e a interface nao dizia nada.
+    const { TokenExpiredError } = await import("@/lib/meta/client");
+    mockSendDirectMessage.mockRejectedValue(
+      new TokenExpiredError("Error validating access token: session invalidated")
+    );
+
+    await processor()(JOB);
+
+    expect(mockPrisma.instagramAccount.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        // Só grava se ainda não estava marcada: o que interessa é desde quando.
+        where: { id: "iga_row", tokenInvalidAt: null },
+        data: expect.objectContaining({ tokenInvalidAt: expect.any(Date) }),
+      })
+    );
+    expect(finishedStatus()).toBe("FAILED");
+  });
+
+  it("não desconecta a conta por um rate limit", async () => {
+    // Rate limit passa sozinho. Marcar a conta aqui pediria uma reconexão que
+    // não resolve nada e assustaria à toa.
+    const { RateLimitError } = await import("@/lib/meta/client");
+    mockSendDirectMessage.mockRejectedValue(new RateLimitError("too many calls"));
+
+    await processor()(JOB);
+
+    expect(mockPrisma.instagramAccount.updateMany).not.toHaveBeenCalled();
+    expect(finishedStatus()).toBe("FAILED");
   });
 
   it("ignora um job que aponta para outro envio", async () => {

@@ -136,16 +136,26 @@ model WorkspaceInvitation {
 }
 
 model InstagramAccount {
-  id                String    @id @default(cuid())
-  workspaceId       String
-  instagramId       String    @unique
-  username          String
-  name              String?
-  accessToken       String
-  tokenExpiresAt    DateTime?
-  webhookSubscribed Boolean   @default(false)
-  connectedAt       DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  instagramId        String    @unique
+  username           String
+  name               String?
+  accessToken        String
+  tokenExpiresAt     DateTime?
+  /// Quando a Meta recusou este token (erro 190). Enquanto estiver preenchido, a
+  /// conta está morta: nenhum envio funciona até alguém reconectar.
+  ///
+  /// Existe porque `tokenExpiresAt` não cobre o caso real: um token é invalidado
+  /// na hora quando a pessoa troca a senha do Instagram ou a Meta derruba a
+  /// sessão por segurança — muito antes da data de expiração.
+  tokenInvalidAt     DateTime?
+  /// A mensagem que a Meta devolveu, para a tela dizer o motivo em vez de um
+  /// "algo deu errado".
+  tokenInvalidReason String?
+  webhookSubscribed  Boolean   @default(false)
+  connectedAt        DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automations       Automation[]

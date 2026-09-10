@@ -46,6 +46,7 @@ import {
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
 import { isWindowOpen } from "@/lib/broadcast/window";
+import { isTokenDead, markTokenInvalid } from "@/lib/meta/account-health";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -500,6 +501,37 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
+    // Token já marcado como morto: não adianta chamar a Meta. Sem esta trava,
+    // cada comentário gastava três tentativas (5, 15 e 45 min) batendo num
+    // token que ia recusar as três — queimando rate limit da conta e CPU da VPS
+    // enquanto o problema real esperava alguém reconectar.
+    if (automation.instagramAccount.tokenInvalidAt) {
+      await prisma.dmLog.upsert({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        create: {
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          instagramAccountId: automation.instagramAccountId,
+          commenterId,
+          commenterName,
+          commentText,
+          commentId,
+          matchedKeyword: matchResult.matchedKeyword,
+          status: "FAILED",
+          errorMessage:
+            "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar.",
+        },
+        update: {
+          status: "FAILED",
+          errorMessage:
+            "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar.",
+        },
+      });
+      continue;
+    }
+
     let rateLimit;
     try {
       rateLimit = await reserveDMSlot(instagramAccountId, requeueAttempt);
@@ -720,6 +752,13 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         automation.workspaceId,
         usage.periodStart
       );
+
+      // A Meta recusou o token (erro 190). Marcar a conta aqui é o que faz o
+      // aviso aparecer na interface e o resto da fila desistir rápido, em vez
+      // de tentar de novo por mais uma hora contra um token morto.
+      if (isTokenDead(error)) {
+        await markTokenInvalid(automation.instagramAccountId, formatError(error));
+      }
 
       await prisma.dmLog.update({
         where: {
@@ -1366,6 +1405,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         automation.workspaceId,
         usage.periodStart
       );
+
+      // Mesma marcação do caminho de comentário: token morto vira estado da
+      // conta, não só uma linha de log que ninguém vê.
+      if (isTokenDead(error)) {
+        await markTokenInvalid(automation.instagramAccountId, formatError(error));
+      }
+
       await prisma.dmLog.upsert({
         where: logKey,
         create: {
@@ -1504,6 +1550,11 @@ async function processBroadcastRecipient(
       })
     );
   } catch (error) {
+    // Um token morto no meio de um disparo recusaria todos os destinatários
+    // seguintes igual. Marcar aqui faz os jobs restantes desistirem na hora.
+    if (isTokenDead(error)) {
+      await markTokenInvalid(account.id, formatError(error));
+    }
     await finish("FAILED", formatError(error));
     return;
   }
