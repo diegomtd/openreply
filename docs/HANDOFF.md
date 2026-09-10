@@ -298,6 +298,157 @@ lido como "ninguém abriu".
 
 `analytics.readRate` é lido/enviado; `analytics.ctr` é clique/enviado.
 
+## 5.5 Envio ativo (janela de 24h) — como funciona
+
+O que o Instagram **não** permite, confirmado na política oficial da Meta:
+
+- One-Time Notifications: "not available for IG Messaging API".
+- Sponsored Messages: "not available for IG Messaging API".
+- As message tags de marketing do Messenger não existem no Instagram. Desde
+  27/04/2026, `CONFIRMED_EVENT_UPDATE`, `ACCOUNT_UPDATE` e `POST_PURCHASE_UPDATE`
+  respondem erro 100.
+- `HUMAN_AGENT` dá 7 dias, mas é para **humano respondendo à mão**. Em envio
+  automatizado é violação de política e a API bloqueia.
+
+Então "disparo para a base" não existe aqui. O que existe é envio para a
+**audiência rolante**: quem mandou mensagem nas últimas 24h. Quem abre janela é
+DM, resposta a story e menção em story — **comentário não abre**, e é por isso
+que `processComment` não mexe em `lastInboundAt` e `processMessage` mexe.
+
+- `lib/broadcast/window.ts` — a regra das 24h num lugar só: `windowState`,
+  `isWindowOpen`, `windowCutoff`. A tela, a prévia e o worker usam o mesmo corte,
+  senão a contagem mentiria em relação às linhas.
+- `lib/broadcast/audience.ts` — o `where`. O filtro de janela é montado **dentro**
+  da função, não recebido de fora: não pode existir caminho que o desligue.
+- `/api/broadcasts/preview` — devolve `reachable`, `expiringSoon`, `total` e
+  `outOfWindow`. Os quatro juntos de propósito: só o `reachable` pareceria filtro
+  quebrado; com o resto do lado, a regra da Meta fica explicada em vez de
+  escondida.
+- `/api/broadcasts` POST — grava `Broadcast` + `BroadcastRecipient` e enfileira
+  **um job por destinatário**, espaçados por `BROADCAST_SPACING_MS` (1,5s). Um job
+  único varrendo centenas de contatos prenderia o worker de 1 core e morreria
+  inteiro no primeiro soluço da Meta. Teto de 500 por envio.
+- O worker **reconfere a janela na vez de cada pessoa**: com o espaçamento, o
+  último da fila chega bem depois do primeiro e a janela dele pode ter fechado.
+  Pulo vira `SKIPPED_WINDOW_CLOSED` com motivo, nunca silêncio.
+- `@@unique([broadcastId, contactId])` é o que torna o job idempotente: retry do
+  BullMQ não manda a mesma mensagem duas vezes.
+- Só owner/admin dispara. A tela pede confirmação em duas etapas, e a confirmação
+  guarda a **assinatura dos filtros** — mexeu em qualquer coisa, ela expira. Não
+  existe "des-enviar" um DM.
+
+### Origem do contato
+
+`Contact.sourceAutomationId` é a **primeira** automação que de fato falou com a
+pessoa. Gravada em `recordAutomationSend` com `updateMany` condicionado a
+`sourceAutomationId: null` — condição e escrita na mesma instrução, então o
+segundo envio nunca sobrescreve o primeiro e dois envios simultâneos não se
+atropelam. A migration faz backfill com `DISTINCT ON` sobre o `DmLog`, contando
+só `SENT`: uma automação que tentou e falhou não trouxe ninguém.
+
+---
+
+## 5.6 Token morto — o incidente e a protecao
+
+Em 2026-09-09, das 20:20 as 20:48, a Meta invalidou o token da conta
+(`Error validating access token: The session has been invalidated because the
+user changed their password or Facebook has changed the session for security
+reasons`). O app falhou o tempo todo **em silencio**: seguidoras reais
+comentaram e nao receberam nada.
+
+A causa nao foi o erro em si, foi o app nao ter estado para ele. `TokenExpiredError`
+ja era lancado no erro 190 — e nada era feito com ele. `tokenExpiresAt` nao
+cobre este caso: o token e invalidado **na hora** quando a senha do Instagram
+muda ou a Meta derruba a sessao, muito antes da data de expiracao.
+
+- `InstagramAccount.tokenInvalidAt` / `tokenInvalidReason`.
+- Gravado com `updateMany` condicionado a `tokenInvalidAt: null`: a primeira
+  falha registra o horario, as seguintes nao o empurram. Interessa **desde
+  quando** esta quebrado.
+- `components/dead-account-banner.tsx` no topo de toda tela, **fora da area
+  rolavel** — com o token morto nada funciona, entao o aviso nao pode sair de
+  vista ao rolar.
+- O worker desiste rapido quando a conta esta marcada. Sem isso, cada comentario
+  gastava tres tentativas (5, 15 e 45 min) contra um token que ia recusar as
+  tres, queimando rate limit e CPU.
+- O callback do OAuth limpa o estado ao reconectar.
+- **Rate limit nao marca a conta.** Ele passa sozinho; pedir reconexao por causa
+  dele mandaria a pessoa refazer login a toa.
+- `lib/ui/api-error.ts` traduz o erro cru para o que houve, por que, e o botao
+  que resolve. O mesmo erro aparece em quatro telas e a resposta e a mesma nas
+  quatro.
+- **E-mail para o dono quando a conta cai** (`lib/email/send.ts`). Um alerta que
+  so existe numa tela que ninguem abre nao e alerta — foi exatamente assim que
+  meia hora de falha passou despercebida.
+
+### Por que o e-mail nao vira spam
+
+`markTokenInvalid` ja usava `updateMany` condicionado a `tokenInvalidAt: null`.
+Essa mesma condicao da o "avisar uma vez so": `count === 1` significa que **esta**
+chamada foi a que marcou, ou seja, e um incidente novo. As dezenas de falhas
+seguintes escrevem zero linhas e nao mandam e-mail nenhum. Sem isso, meia hora de
+automacao falhando viraria meia hora de e-mails.
+
+O envio e best-effort e nunca lanca: quem chama isso esta no meio de tratar um
+problema, e falhar ao **avisar** sobre o problema nao pode virar um segundo
+problema. Sem `RESEND_API_KEY` configurada ele desiste em silencio — numa
+instalacao propria e-mail e opcional, e o aviso na tela continua de pe.
+
+---
+
+## 5.7 Passada de UI depois do primeiro uso real (2026-09-10)
+
+O que o uso real mostrou, e o que mudou:
+
+- **Automacoes** eram ate seis selos lado a lado (gatilho, DM, story, mencao,
+  condicao, frequencia) mais palavras-chave soltas mais sete metricas separadas
+  por ponto — quinze elementos do mesmo peso. Seis coisas com o mesmo peso viram
+  zero coisas. Agora: uma frase de comportamento, palavras-chave com teto de 4, e
+  numeros so quando dizem algo. **Falha aparece em vermelho** — foi uma pilha de
+  falhas perdida no meio dos pontinhos cinza que deixou o token morto invisivel.
+- **Registros**: o motivo era truncado exatamente onde a informacao comecava,
+  atras de um `title` que ninguem descobre. Agora a linha abre e mostra o
+  comentario, a explicacao humana, o botao de acao quando existe, e a mensagem
+  crua por ultimo.
+- **Inicio**: cada numero leva para a lista que o explica (`/logs?status=...`).
+  A tela de Registros passou a ler `?status` da URL, validado contra a lista
+  conhecida.
+- **Caixa de entrada e Analise** mostravam a string crua da Meta, em ingles.
+  Agora usam `ErrorState`.
+
+---
+
+## 5.8 Revisão de código do Envio ativo (2026-09-10)
+
+Uma revisão no diff inteiro achou oito defeitos que testes e typecheck não
+pegam, porque são de comportamento. Todos corrigidos:
+
+| Defeito | Por que importava |
+|---|---|
+| Trava de token morto **depois** de `reserveWorkspaceDMSend`, saindo sem devolver | Queimava cota mensal por DM que nunca saiu. Movida para **antes** de reservar. |
+| `processBroadcastRecipient` não lia `tokenInvalidAt` | O comentário prometia que o disparo pararia; o código não fazia. 500 destinatários virariam 500 chamadas que a Meta já recusou. |
+| Destinatários reordenados por `createdAt` | `createMany` carimba o **mesmo** instante em todas as linhas, então a ordem "quem sai da janela primeiro" era arbitrária — e o mais urgente podia ficar por último e ser pulado. Agora ordena por `windowClosesAt`. |
+| POST repetido criava outro envio | Duplo clique, retry de rede ou refresh mandava tudo de novo, e não existe des-enviar um DM. `Broadcast.requestId` único, checado na aplicação **e** garantido pelo banco. |
+| Finalização com `update` solto | Dois jobs do mesmo destinatário (job travado redistribuído pelo BullMQ) contavam duas vezes. Agora `updateMany` condicionado a `status: PENDING`. |
+| Tela ignorava `truncated` | Um envio cortado no teto de 500 parecia ter alcançado todo mundo, e quem ficou de fora sai da janela antes de uma segunda tentativa. |
+| `?status=` lido no inicializador do `useState` | Incompatibilidade de hidratação no caminho que os cartões do Início passaram a usar. Movido para efeito pós-montagem. |
+| `Date.now()` no banner durante SSR | Servidor e cliente discordavam na virada do minuto. Primeira renderização mostra horário absoluto; o relativo entra ao montar. |
+
+`BROADCAST_SPACING_MS` também ganhou guarda: `Math.max(200, NaN)` é `NaN`, e um
+delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
+existe para evitar.
+
+### Limitações conhecidas do Envio ativo
+
+- **Não aparece em Registros.** `DmLog.automationId` é NOT NULL e um envio ativo
+  não tem automação, então não dá para gravar lá sem tornar a coluna nula. O
+  histórico dele fica na própria tela de Envio ativo.
+- **Não conta na cota mensal** (`reserveWorkspaceDMSend`). Pouco relevante numa
+  instalação própria, onde o limite de plano não é o gargalo, mas é uma
+  diferença real em relação às automações.
+
+---
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -501,6 +652,10 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
+| 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
+| 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |
+| 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |
 | 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |
 | 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |
 | 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |

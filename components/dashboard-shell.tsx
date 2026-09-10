@@ -3,12 +3,22 @@
 import { useState } from "react";
 import Sidebar from "@/components/sidebar";
 import TopBar from "@/components/top-bar";
+import DeadAccountBanner from "@/components/dead-account-banner";
+
+interface DeadAccount {
+  id: string;
+  username: string;
+  tokenInvalidAt: string;
+  tokenInvalidReason: string | null;
+}
 
 interface DashboardShellProps {
   children: React.ReactNode;
   workspaceName: string;
   instagramUsername: string | null;
   instagramAccountCount: number;
+  /// Contas cujo token a Meta recusou. Enquanto houver alguma, nada envia.
+  deadAccounts: DeadAccount[];
 }
 
 export default function DashboardShell({
@@ -16,6 +26,7 @@ export default function DashboardShell({
   workspaceName,
   instagramUsername,
   instagramAccountCount,
+  deadAccounts,
 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -35,6 +46,10 @@ export default function DashboardShell({
           instagramUsername={instagramUsername}
           instagramAccountCount={instagramAccountCount}
         />
+
+        {/* Acima do conteúdo e fora da área rolável: com o token morto nada
+            funciona, então o aviso não pode sair de vista ao rolar. */}
+        <DeadAccountBanner accounts={deadAccounts} />
 
         <main className="flex-1 overflow-y-auto">
           <div className="px-4 lg:px-8 py-5 sm:py-6 max-w-7xl mx-auto">

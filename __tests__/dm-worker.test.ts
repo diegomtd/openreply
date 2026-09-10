@@ -35,6 +35,7 @@ const {
       upsert: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     contactAutomationState: {
       findMany: vi.fn(),
@@ -126,6 +127,7 @@ vi.mock("@/lib/queue/client", () => ({
   POSTBACK_JOB_NAME: "process-postback",
   FOLLOWUP_JOB_NAME: "process-followup",
   MESSAGE_JOB_NAME: "process-message",
+  BROADCAST_JOB_NAME: "process-broadcast-recipient",
 }));
 
 vi.mock("bullmq", () => {
@@ -533,7 +535,7 @@ describe("DM Worker — Full Pipeline", () => {
     expect(mockSendPrivateReply).not.toHaveBeenCalled();
   });
 
-  it("should use 'there' when commenter name is not available", async () => {
+  it("drops the {username} placeholder when the person has no name", async () => {
     const processor = getProcessor();
     const jobDataWithoutName = {
       instagramAccountId: mockJobData.instagramAccountId,
@@ -549,7 +551,9 @@ describe("DM Worker — Full Pipeline", () => {
       "decrypted_token",
       "ig_456",
       "comment_555",
-      "Hey there! Here is the link: https://example.com"
+      // Sem nome, o placeholder sai junto com o espaco anterior. O fallback
+      // antigo era a palavra "there", que num app em portugues virava "Oi there".
+      "Hey! Here is the link: https://example.com"
     );
   });
 

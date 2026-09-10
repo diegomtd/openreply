@@ -5,11 +5,13 @@ import {
   MESSAGE_JOB_NAME,
   POSTBACK_JOB_NAME,
   FOLLOWUP_JOB_NAME,
+  BROADCAST_JOB_NAME,
   type DmQueueJob,
   type ProcessCommentJob,
   type ProcessMessageJob,
   type ProcessPostbackJob,
   type ProcessFollowUpJob,
+  type ProcessBroadcastRecipientJob,
 } from "./client";
 import { prisma } from "@/lib/db/client";
 import type { DmStatus } from "@/app/generated/prisma/client";
@@ -43,6 +45,8 @@ import {
   reserveWorkspaceDMSend,
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
+import { isWindowOpen } from "@/lib/broadcast/window";
+import { isTokenDead, markTokenInvalid } from "@/lib/meta/account-health";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -479,6 +483,39 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
+    // Token já marcado como morto: não adianta chamar a Meta. Fica ANTES de
+    // reservar a cota do mês de propósito — sair depois da reserva sem
+    // devolvê-la queimava cota por um DM que nunca saiu. Sem esta trava,
+    // cada comentário gastava três tentativas (5, 15 e 45 min) batendo num
+    // token que ia recusar as três — queimando rate limit da conta e CPU da VPS
+    // enquanto o problema real esperava alguém reconectar.
+    if (automation.instagramAccount.tokenInvalidAt) {
+      await prisma.dmLog.upsert({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        create: {
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          instagramAccountId: automation.instagramAccountId,
+          commenterId,
+          commenterName,
+          commentText,
+          commentId,
+          matchedKeyword: matchResult.matchedKeyword,
+          status: "FAILED",
+          errorMessage:
+            "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar.",
+        },
+        update: {
+          status: "FAILED",
+          errorMessage:
+            "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar.",
+        },
+      });
+      continue;
+    }
+
     const usage = await reserveWorkspaceDMSend(automation.workspaceId);
     if (!usage.allowed) {
       await prisma.dmLog.update({
@@ -717,6 +754,13 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         automation.workspaceId,
         usage.periodStart
       );
+
+      // A Meta recusou o token (erro 190). Marcar a conta aqui é o que faz o
+      // aviso aparecer na interface e o resto da fila desistir rápido, em vez
+      // de tentar de novo por mais uma hora contra um token morto.
+      if (isTokenDead(error)) {
+        await markTokenInvalid(automation.instagramAccountId, formatError(error));
+      }
 
       await prisma.dmLog.update({
         where: {
@@ -1363,6 +1407,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         automation.workspaceId,
         usage.periodStart
       );
+
+      // Mesma marcação do caminho de comentário: token morto vira estado da
+      // conta, não só uma linha de log que ninguém vê.
+      if (isTokenDead(error)) {
+        await markTokenInvalid(automation.instagramAccountId, formatError(error));
+      }
+
       await prisma.dmLog.upsert({
         where: logKey,
         create: {
@@ -1382,6 +1433,179 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   }
 }
 
+/**
+ * Um destinatário de um Envio ativo.
+ *
+ * A janela é reconferida **aqui**, e não só na hora de montar a audiência: com
+ * o espaçamento entre envios, o último da fila pode chegar bem depois do
+ * primeiro, e a janela dele pode ter fechado nesse meio tempo. Enviar assim
+ * tomaria recusa da Meta e contaria como tentativa fora da política.
+ */
+async function processBroadcastRecipient(
+  job: Job<ProcessBroadcastRecipientJob>
+): Promise<void> {
+  const { broadcastId, recipientId } = job.data;
+
+  const recipient = await prisma.broadcastRecipient.findUnique({
+    where: { id: recipientId },
+    select: {
+      id: true,
+      status: true,
+      broadcast: {
+        select: {
+          id: true,
+          status: true,
+          message: true,
+          instagramAccount: {
+            select: {
+              id: true,
+              instagramId: true,
+              accessToken: true,
+              tokenInvalidAt: true,
+            },
+          },
+        },
+      },
+      contact: {
+        select: {
+          id: true,
+          igsid: true,
+          username: true,
+          optedOut: true,
+          lastInboundAt: true,
+        },
+      },
+    },
+  });
+
+  // Já resolvido: um retry do BullMQ depois de um envio bem-sucedido cai aqui, e
+  // reenviar seria mandar a mesma mensagem duas vezes para a mesma pessoa.
+  if (!recipient || recipient.status !== "PENDING") return;
+  if (recipient.broadcast.id !== broadcastId) return;
+
+  const finish = async (
+    status: "SENT" | "FAILED" | "SKIPPED_WINDOW_CLOSED" | "SKIPPED_OPTED_OUT" | "SKIPPED_CANCELLED",
+    reason?: string
+  ) => {
+    const counter =
+      status === "SENT"
+        ? { sentCount: { increment: 1 } }
+        : status === "FAILED"
+          ? { failedCount: { increment: 1 } }
+          : { skippedCount: { increment: 1 } };
+
+    // `updateMany` condicionado a PENDING, e não um `update` solto: se o BullMQ
+    // redistribuir um job travado, duas execuções podem chegar aqui para o mesmo
+    // destinatário. Com a condição, só a primeira resolve — a segunda escreve
+    // zero linhas e não incrementa o contador do envio.
+    //
+    // (Isto fecha a contagem dupla. O envio em si já saiu antes deste ponto, e
+    // proteger contra isso exigiria um estado "enviando" que, num processo
+    // morto no meio, deixaria o destinatário travado para sempre — remédio pior
+    // que a doença para um caso que depende do lock do BullMQ expirar.)
+    const claimed = await prisma.broadcastRecipient.updateMany({
+      where: { id: recipient.id, status: "PENDING" },
+      data: {
+        status,
+        reason: reason ?? null,
+        ...(status === "SENT" ? { sentAt: new Date() } : {}),
+      },
+    });
+    if (claimed.count === 0) return;
+
+    await prisma.broadcast.update({ where: { id: broadcastId }, data: counter });
+
+    await closeBroadcastIfDone(broadcastId);
+  };
+
+  if (recipient.broadcast.status === "CANCELLED") {
+    await finish("SKIPPED_CANCELLED", "O envio foi cancelado antes da vez desta pessoa");
+    return;
+  }
+
+  // Pediu para parar depois que a audiência foi montada. O opt-out vale sempre,
+  // e um envio já disparado não é exceção.
+  if (recipient.contact.optedOut) {
+    await finish("SKIPPED_OPTED_OUT", "A pessoa pediu para parar de receber mensagens");
+    return;
+  }
+
+  if (!isWindowOpen(recipient.contact.lastInboundAt)) {
+    await finish(
+      "SKIPPED_WINDOW_CLOSED",
+      "A janela de 24h fechou antes da vez desta pessoa"
+    );
+    return;
+  }
+
+  const account = recipient.broadcast.instagramAccount;
+
+  // Token já morto: os destinatários restantes deste disparo tomariam a mesma
+  // recusa. Desistir aqui é o que impede um envio de 500 pessoas virar 500
+  // chamadas à Meta com um token que ela já recusou.
+  if (account.tokenInvalidAt) {
+    await finish(
+      "FAILED",
+      "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar."
+    );
+    return;
+  }
+
+  if (!account.accessToken) {
+    await finish("FAILED", "A conta do Instagram está sem token");
+    return;
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = decryptToken(account.accessToken);
+  } catch {
+    await finish("FAILED", "Não foi possível ler o token da conta");
+    return;
+  }
+
+  try {
+    await sendDirectMessage(
+      accessToken,
+      account.instagramId,
+      recipient.contact.igsid,
+      renderMessageWithoutLink({
+        message: recipient.broadcast.message,
+        commenterName: recipient.contact.username,
+      })
+    );
+  } catch (error) {
+    // Um token morto no meio de um disparo recusaria todos os destinatários
+    // seguintes igual. Marcar aqui faz os jobs restantes desistirem na hora.
+    if (isTokenDead(error)) {
+      await markTokenInvalid(account.id, formatError(error));
+    }
+    await finish("FAILED", formatError(error));
+    return;
+  }
+
+  await finish("SENT");
+}
+
+/**
+ * Fecha o envio quando não sobra ninguém pendente.
+ *
+ * Um `updateMany` condicionado a `status: "SENDING"`, e não um `update` solto:
+ * dois destinatários terminando ao mesmo tempo chamam isto em paralelo, e sem a
+ * condição os dois escreveriam `finishedAt`.
+ */
+async function closeBroadcastIfDone(broadcastId: string): Promise<void> {
+  const pending = await prisma.broadcastRecipient.count({
+    where: { broadcastId, status: "PENDING" },
+  });
+  if (pending > 0) return;
+
+  await prisma.broadcast.updateMany({
+    where: { id: broadcastId, status: "SENDING" },
+    data: { status: "DONE", finishedAt: new Date() },
+  });
+}
+
 async function processJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
@@ -1392,6 +1616,9 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === MESSAGE_JOB_NAME) {
     return processMessage(job as Job<ProcessMessageJob>);
   }
+  if (job.name === BROADCAST_JOB_NAME) {
+    return processBroadcastRecipient(job as Job<ProcessBroadcastRecipientJob>);
+  }
   return processComment(job as Job<ProcessCommentJob>);
 }
 
@@ -1400,7 +1627,12 @@ async function recordWorkerFailure(
   error: Error
 ) {
   try {
-    const instagramAccountId = job?.data.instagramAccountId;
+    // Um job de Envio ativo é endereçado por destinatário, não por conta, então
+    // não carrega `instagramAccountId` — mesmo estreitamento usado no commentId.
+    const instagramAccountId =
+      job && "instagramAccountId" in job.data
+        ? job.data.instagramAccountId
+        : undefined;
     const commentId =
       job && "commentId" in job.data ? job.data.commentId : null;
     const account = instagramAccountId
