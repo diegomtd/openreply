@@ -377,6 +377,22 @@ muda ou a Meta derruba a sessao, muito antes da data de expiracao.
 - `lib/ui/api-error.ts` traduz o erro cru para o que houve, por que, e o botao
   que resolve. O mesmo erro aparece em quatro telas e a resposta e a mesma nas
   quatro.
+- **E-mail para o dono quando a conta cai** (`lib/email/send.ts`). Um alerta que
+  so existe numa tela que ninguem abre nao e alerta — foi exatamente assim que
+  meia hora de falha passou despercebida.
+
+### Por que o e-mail nao vira spam
+
+`markTokenInvalid` ja usava `updateMany` condicionado a `tokenInvalidAt: null`.
+Essa mesma condicao da o "avisar uma vez so": `count === 1` significa que **esta**
+chamada foi a que marcou, ou seja, e um incidente novo. As dezenas de falhas
+seguintes escrevem zero linhas e nao mandam e-mail nenhum. Sem isso, meia hora de
+automacao falhando viraria meia hora de e-mails.
+
+O envio e best-effort e nunca lanca: quem chama isso esta no meio de tratar um
+problema, e falhar ao **avisar** sobre o problema nao pode virar um segundo
+problema. Sem `RESEND_API_KEY` configurada ele desiste em silencio — numa
+instalacao propria e-mail e opcional, e o aviso na tela continua de pe.
 
 ---
 
@@ -636,6 +652,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
 | 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
 | 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |
 | 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |

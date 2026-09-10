@@ -18,10 +18,61 @@
 
 import { prisma } from "@/lib/db/client";
 import { TokenExpiredError } from "@/lib/meta/client";
+import { sendEmail } from "@/lib/email/send";
 
 /** O erro é a Meta dizendo "este token morreu"? */
 export function isTokenDead(error: unknown): boolean {
   return error instanceof TokenExpiredError;
+}
+
+/**
+ * Avisa o dono do workspace, uma vez por incidente.
+ *
+ * Best-effort de propósito: quem chama isto está no meio de tratar um problema,
+ * e falhar ao **avisar** sobre o problema não pode virar um segundo problema.
+ * O aviso na tela não depende deste e-mail.
+ */
+async function notifyOwner(instagramAccountRowId: string, reason: string) {
+  try {
+    const account = await prisma.instagramAccount.findUnique({
+      where: { id: instagramAccountRowId },
+      select: {
+        username: true,
+        workspace: { select: { owner: { select: { email: true } } } },
+      },
+    });
+
+    const to = account?.workspace.owner.email;
+    if (!to) return;
+
+    const baseUrl = (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(
+      /\/$/,
+      ""
+    );
+
+    const result = await sendEmail({
+      to,
+      subject: `A conta @${account.username} parou de enviar`,
+      text: [
+        `O Instagram recusou o acesso da conta @${account.username}, e nenhuma automação está enviando.`,
+        "",
+        "Isso costuma acontecer quando a senha do Instagram muda ou a Meta encerra a sessão por segurança.",
+        "",
+        `Para voltar a funcionar, reconecte a conta: ${baseUrl}/settings`,
+        "",
+        `Motivo informado pela Meta: ${reason}`,
+      ].join("\n"),
+    });
+
+    if (!result.sent && result.reason === "failed") {
+      console.error(
+        "[account-health] Falha ao avisar sobre conta desconectada:",
+        result.detail
+      );
+    }
+  } catch (error) {
+    console.error("[account-health] Erro ao tentar avisar o dono:", error);
+  }
 }
 
 /**
@@ -30,15 +81,24 @@ export function isTokenDead(error: unknown): boolean {
  * `updateMany` com `tokenInvalidAt: null` no where: a primeira falha grava o
  * horário, as seguintes não o empurram para frente. O que interessa é **desde
  * quando** está quebrado, não a última vez que alguém tentou.
+ *
+ * Essa mesma condição é o que dá o "avisar uma vez só": `count === 1` significa
+ * que **esta** chamada foi a que marcou, ou seja, é um incidente novo. As
+ * dezenas de falhas seguintes escrevem zero linhas e não mandam e-mail nenhum.
+ * Sem isso, meia hora de automação falhando viraria meia hora de e-mails.
  */
 export async function markTokenInvalid(
   instagramAccountRowId: string,
   reason: string
 ): Promise<void> {
-  await prisma.instagramAccount.updateMany({
+  const marked = await prisma.instagramAccount.updateMany({
     where: { id: instagramAccountRowId, tokenInvalidAt: null },
     data: { tokenInvalidAt: new Date(), tokenInvalidReason: reason.slice(0, 500) },
   });
+
+  if (marked.count === 1) {
+    await notifyOwner(instagramAccountRowId, reason);
+  }
 }
 
 /** Mesma marcação, a partir do IGSID que vem no webhook. */
@@ -46,10 +106,18 @@ export async function markTokenInvalidByInstagramId(
   instagramId: string,
   reason: string
 ): Promise<void> {
-  await prisma.instagramAccount.updateMany({
+  const marked = await prisma.instagramAccount.updateMany({
     where: { instagramId, tokenInvalidAt: null },
     data: { tokenInvalidAt: new Date(), tokenInvalidReason: reason.slice(0, 500) },
   });
+
+  if (marked.count !== 1) return;
+
+  const account = await prisma.instagramAccount.findUnique({
+    where: { instagramId },
+    select: { id: true },
+  });
+  if (account) await notifyOwner(account.id, reason);
 }
 
 /**

@@ -1,12 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockPrisma } = vi.hoisted(() => ({
+const { mockPrisma, mockSendEmail } = vi.hoisted(() => ({
   mockPrisma: {
-    instagramAccount: { updateMany: vi.fn(), findMany: vi.fn() },
+    instagramAccount: {
+      updateMany: vi.fn(),
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+    },
   },
+  mockSendEmail: vi.fn(),
 }));
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
+vi.mock("@/lib/email/send", () => ({ sendEmail: mockSendEmail }));
 
 import {
   isTokenDead,
@@ -25,6 +31,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.instagramAccount.updateMany.mockResolvedValue({ count: 1 });
   mockPrisma.instagramAccount.findMany.mockResolvedValue([]);
+  mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+    id: "iga_1",
+    username: "odiegoalves_",
+    workspace: { owner: { email: "dono@exemplo.com" } },
+  });
+  mockSendEmail.mockResolvedValue({ sent: true });
 });
 
 describe("isTokenDead", () => {
@@ -118,5 +130,57 @@ describe("findDeadAccounts", () => {
 
   it("não devolve nada quando está tudo saudável", async () => {
     expect(await findDeadAccounts("w1")).toEqual([]);
+  });
+});
+
+describe("aviso por e-mail", () => {
+  it("avisa o dono quando a conta cai", async () => {
+    await markTokenInvalid("iga_1", "session invalidated");
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    const message = mockSendEmail.mock.calls[0][0];
+    expect(message.to).toBe("dono@exemplo.com");
+    expect(message.subject).toContain("odiegoalves_");
+    // Precisa dizer o que fazer, nao so que quebrou.
+    expect(message.text).toContain("/settings");
+    expect(message.text).toContain("session invalidated");
+  });
+
+  it("não manda e-mail quando a conta já estava marcada", async () => {
+    // Esta e a garantia que importa: o incidente real foram DEZENAS de falhas
+    // em meia hora. Sem isto, teriam virado dezenas de e-mails.
+    mockPrisma.instagramAccount.updateMany.mockResolvedValue({ count: 0 });
+
+    await markTokenInvalid("iga_1", "session invalidated");
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("não deixa uma falha de e-mail virar um segundo problema", async () => {
+    // Quem chama isto esta no meio de tratar um problema. Falhar ao AVISAR nao
+    // pode derrubar o worker: o aviso na tela nao depende do e-mail.
+    mockSendEmail.mockRejectedValue(new Error("resend fora do ar"));
+
+    await expect(
+      markTokenInvalid("iga_1", "session invalidated")
+    ).resolves.toBeUndefined();
+  });
+
+  it("não tenta enviar quando não há dono com e-mail", async () => {
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+      id: "iga_1",
+      username: "conta",
+      workspace: { owner: { email: null } },
+    });
+
+    await markTokenInvalid("iga_1", "session invalidated");
+
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("avisa também quando a marcação vem pelo IGSID do webhook", async () => {
+    await markTokenInvalidByInstagramId("178414", "session invalidated");
+
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 });
