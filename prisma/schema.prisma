@@ -503,6 +503,13 @@ model Broadcast {
   workspaceId        String
   instagramAccountId String
 
+  /// Chave de idempotência gerada pela tela ao confirmar o envio.
+  ///
+  /// Sem ela, um POST repetido — duplo clique, retry de rede, refresh no meio —
+  /// criava um Broadcast novo e mandava tudo de novo. Não existe des-enviar um
+  /// DM, então este é o tipo de erro que não dá para corrigir depois.
+  requestId String? @unique
+
   /// Nome interno, para achar na lista depois.
   name    String
   message String

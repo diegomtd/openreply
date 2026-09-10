@@ -402,6 +402,37 @@ O que o uso real mostrou, e o que mudou:
 
 ---
 
+## 5.8 Revisão de código do Envio ativo (2026-09-10)
+
+Uma revisão no diff inteiro achou oito defeitos que testes e typecheck não
+pegam, porque são de comportamento. Todos corrigidos:
+
+| Defeito | Por que importava |
+|---|---|
+| Trava de token morto **depois** de `reserveWorkspaceDMSend`, saindo sem devolver | Queimava cota mensal por DM que nunca saiu. Movida para **antes** de reservar. |
+| `processBroadcastRecipient` não lia `tokenInvalidAt` | O comentário prometia que o disparo pararia; o código não fazia. 500 destinatários virariam 500 chamadas que a Meta já recusou. |
+| Destinatários reordenados por `createdAt` | `createMany` carimba o **mesmo** instante em todas as linhas, então a ordem "quem sai da janela primeiro" era arbitrária — e o mais urgente podia ficar por último e ser pulado. Agora ordena por `windowClosesAt`. |
+| POST repetido criava outro envio | Duplo clique, retry de rede ou refresh mandava tudo de novo, e não existe des-enviar um DM. `Broadcast.requestId` único, checado na aplicação **e** garantido pelo banco. |
+| Finalização com `update` solto | Dois jobs do mesmo destinatário (job travado redistribuído pelo BullMQ) contavam duas vezes. Agora `updateMany` condicionado a `status: PENDING`. |
+| Tela ignorava `truncated` | Um envio cortado no teto de 500 parecia ter alcançado todo mundo, e quem ficou de fora sai da janela antes de uma segunda tentativa. |
+| `?status=` lido no inicializador do `useState` | Incompatibilidade de hidratação no caminho que os cartões do Início passaram a usar. Movido para efeito pós-montagem. |
+| `Date.now()` no banner durante SSR | Servidor e cliente discordavam na virada do minuto. Primeira renderização mostra horário absoluto; o relativo entra ao montar. |
+
+`BROADCAST_SPACING_MS` também ganhou guarda: `Math.max(200, NaN)` é `NaN`, e um
+delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
+existe para evitar.
+
+### Limitações conhecidas do Envio ativo
+
+- **Não aparece em Registros.** `DmLog.automationId` é NOT NULL e um envio ativo
+  não tem automação, então não dá para gravar lá sem tornar a coluna nula. O
+  histórico dele fica na própria tela de Envio ativo.
+- **Não conta na cota mensal** (`reserveWorkspaceDMSend`). Pouco relevante numa
+  instalação própria, onde o limite de plano não é o gargalo, mas é uma
+  diferença real em relação às automações.
+
+---
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -605,6 +636,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
 | 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |
 | 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |
 | 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |

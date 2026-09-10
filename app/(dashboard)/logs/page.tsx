@@ -69,13 +69,7 @@ export default function LogsPage() {
    * Validado contra a lista conhecida: um `status` inventado na URL volta para
    * "Tudo" em vez de filtrar por nada e parecer que não há registro nenhum.
    */
-  const [statusFilter, setStatusFilter] = useState<string>(() => {
-    if (typeof window === "undefined") return "ALL";
-    const requested = new URLSearchParams(window.location.search).get("status");
-    return STATUS_FILTERS.some((option) => option.value === requested)
-      ? (requested as string)
-      : "ALL";
-  });
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [page, setPage] = useState(1);
@@ -100,6 +94,28 @@ export default function LogsPage() {
       setLoading(false);
     }
   }, [page, statusFilter, selectedAccountId]);
+
+  /**
+   * Filtro inicial vindo da URL (`/logs?status=FAILED`), aplicado DEPOIS da
+   * hidratação.
+   *
+   * Lê-lo no inicializador do `useState` faria o servidor renderizar "Tudo" e o
+   * cliente "Falhou" — incompatibilidade de hidratação bem no caminho que os
+   * cartões do Início passaram a usar. Validado contra a lista conhecida: um
+   * `status` inventado volta para "Tudo" em vez de filtrar por nada e parecer
+   * que não existe registro nenhum.
+   */
+  useEffect(() => {
+    // Adiado um tick, como os outros efeitos desta tela: mudar estado direto no
+    // corpo do efeito cascateia renderização, e o lint do projeto barra.
+    const timer = window.setTimeout(() => {
+      const requested = new URLSearchParams(window.location.search).get("status");
+      if (requested && STATUS_FILTERS.some((option) => option.value === requested)) {
+        setStatusFilter(requested);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     fetch("/api/dashboard/stats")

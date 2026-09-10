@@ -78,6 +78,13 @@ const createSchema = z.object({
   tags: z.array(z.string()).max(20).optional(),
   excludedTags: z.array(z.string()).max(20).optional(),
   sourceAutomationId: z.string().nullish(),
+  /**
+   * Chave de idempotência gerada pela tela ao confirmar.
+   *
+   * Um POST repetido com a mesma chave devolve o envio já criado em vez de
+   * disparar tudo de novo. Não existe des-enviar um DM.
+   */
+  requestId: z.string().min(8).max(64).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -128,6 +135,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Idempotência: se esta chave já disparou, devolve aquele envio. Fica antes
+  // de montar a audiência porque a resposta certa é "já fiz", não "vou fazer de
+  // novo com a audiência de agora".
+  if (input.requestId) {
+    const existing = await prisma.broadcast.findUnique({
+      where: { requestId: input.requestId },
+      select: { id: true, totalRecipients: true, workspaceId: true },
+    });
+    if (existing && existing.workspaceId === context.workspaceId) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          id: existing.id,
+          totalRecipients: existing.totalRecipients,
+          estimatedMinutes: 0,
+          truncated: false,
+          maxRecipients: MAX_RECIPIENTS,
+          alreadyQueued: true,
+        },
+      });
+    }
+  }
+
   const filters: AudienceFilters = {
     instagramAccountId: input.instagramAccountId,
     tags: input.tags,
@@ -169,6 +199,7 @@ export async function POST(request: NextRequest) {
         filterSourceAutomationId: input.sourceAutomationId ?? null,
         totalRecipients: audience.length,
         createdById: context.userId ?? null,
+        requestId: input.requestId ?? null,
         startedAt: now,
       },
       select: { id: true },
@@ -189,7 +220,11 @@ export async function POST(request: NextRequest) {
   // Redis estiver fora, o envio fica registrado como pendente em vez de sumir.
   const recipients = await prisma.broadcastRecipient.findMany({
     where: { broadcastId: broadcast.id },
-    orderBy: { createdAt: "asc" },
+    // Por `windowClosesAt`, e não por `createdAt`: o `createMany` acima carimba
+    // o MESMO instante em todas as linhas, então ordenar por ele devolveria
+    // qualquer ordem — e quem estava a minutos de sair da janela podia acabar
+    // no fim da fila e ser pulado. `windowClosesAt` é a urgência de verdade.
+    orderBy: { windowClosesAt: "asc" },
     select: { id: true },
   });
 

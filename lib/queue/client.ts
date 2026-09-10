@@ -104,10 +104,12 @@ export const BROADCAST_JOB_NAME = "process-broadcast-recipient";
  * é a forma mais rápida de tomar bloqueio e derrubar o app junto. Configurável
  * porque o número certo depende do tamanho da conta.
  */
-export const BROADCAST_SPACING_MS = Math.max(
-  200,
-  Number(process.env.BROADCAST_SPACING_MS ?? 1500)
-);
+export const BROADCAST_SPACING_MS = (() => {
+  const configured = Number(process.env.BROADCAST_SPACING_MS);
+  // `Math.max(200, NaN)` é NaN, e um delay NaN faria a fila inteira sair de uma
+  // vez — exatamente o oposto do que o espaçamento existe para evitar.
+  return Number.isFinite(configured) ? Math.max(200, configured) : 1500;
+})();
 
 let dmQueue: Queue<DmQueueJob> | null = null;
 

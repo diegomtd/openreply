@@ -115,6 +115,14 @@ export default function BroadcastsPage() {
    * disparar para outras 300 depois de mexer no filtro seria irreversível.
    */
   const [confirmedFor, setConfirmedFor] = useState<string | null>(null);
+  /**
+   * Chave de idempotência desta confirmação.
+   *
+   * Gerada uma vez ao entrar na etapa de confirmar e mandada junto no POST: um
+   * duplo clique ou um retry de rede reaproveita a mesma chave, e o servidor
+   * devolve o envio já criado em vez de disparar tudo de novo.
+   */
+  const [requestId, setRequestId] = useState<string | null>(null);
 
   const tags = useMemo(() => parseTags(tagsInput), [tagsInput]);
   const excludedTags = useMemo(() => parseTags(excludedInput), [excludedInput]);
@@ -224,6 +232,7 @@ export default function BroadcastsPage() {
           tags,
           excludedTags,
           sourceAutomationId: sourceAutomationId || null,
+          requestId,
         }),
       });
       const payload = await res.json();
@@ -231,14 +240,33 @@ export default function BroadcastsPage() {
         setError(payload.error ?? "Não foi possível disparar o envio");
         return;
       }
-      setResult(
-        `Envio na fila para ${payload.data.totalRecipients} ${
-          payload.data.totalRecipients === 1 ? "pessoa" : "pessoas"
-        }. Leva cerca de ${payload.data.estimatedMinutes} min para escoar.`
-      );
+      const { totalRecipients, estimatedMinutes, truncated, maxRecipients, alreadyQueued } =
+        payload.data;
+
+      if (alreadyQueued) {
+        // Idempotência do servidor respondeu: este envio já tinha sido feito.
+        setResult(
+          `Este envio já estava na fila para ${totalRecipients} ${
+            totalRecipients === 1 ? "pessoa" : "pessoas"
+          }. Nada foi enviado duas vezes.`
+        );
+      } else {
+        setResult(
+          `Envio na fila para ${totalRecipients} ${
+            totalRecipients === 1 ? "pessoa" : "pessoas"
+          }. Leva cerca de ${estimatedMinutes} min para escoar.` +
+            // Sem este aviso, um envio cortado no teto parecia ter alcançado
+            // todo mundo — e as pessoas que ficaram de fora saem da janela de
+            // 24h antes de uma segunda tentativa.
+            (truncated
+              ? ` Atenção: o envio foi limitado a ${maxRecipients} pessoas por vez, então parte da audiência ficou de fora. Dispare de novo para alcançar o restante enquanto a janela delas ainda estiver aberta.`
+              : "")
+        );
+      }
       setName("");
       setMessage("");
       setConfirmedFor(null);
+      setRequestId(null);
       loadBroadcasts();
     } catch (err) {
       console.error("Falha ao disparar:", err);
@@ -384,7 +412,14 @@ export default function BroadcastsPage() {
             </div>
           ) : (
             <button
-              onClick={() => setConfirmedFor(signature)}
+              onClick={() => {
+                setConfirmedFor(signature);
+                setRequestId(
+                  typeof crypto !== "undefined" && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : `bc-${Date.now()}-${Math.random().toString(36).slice(2)}`
+                );
+              }}
               disabled={!canSend}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >

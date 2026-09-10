@@ -12,6 +12,10 @@
  * ajuda a decidir o que fazer.
  */
 
+"use client";
+
+import { useEffect, useState } from "react";
+
 interface DeadAccount {
   id: string;
   username: string;
@@ -19,8 +23,22 @@ interface DeadAccount {
   tokenInvalidReason: string | null;
 }
 
-function since(value: string): string {
-  const minutes = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 60000));
+/**
+ * "há 20 min", calculado só no navegador.
+ *
+ * `Date.now()` roda no servidor e de novo na hidratação; na virada do minuto os
+ * dois discordam e o React reclama de incompatibilidade. Então a primeira
+ * renderização mostra o horário absoluto — que é informação de verdade, não um
+ * placeholder — e o relativo entra depois que o componente monta.
+ */
+function since(value: string, now: number | null): string {
+  if (now === null) {
+    return `desde ${new Date(value).toLocaleString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  }
+  const minutes = Math.max(1, Math.round((now - new Date(value).getTime()) / 60000));
   if (minutes < 60) return `há ${minutes} min`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `há ${hours}h`;
@@ -33,6 +51,13 @@ export default function DeadAccountBanner({
 }: {
   accounts: DeadAccount[];
 }) {
+  // null até montar: é o que mantém servidor e cliente escrevendo a mesma coisa.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNow(Date.now()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   if (accounts.length === 0) return null;
 
   return (
@@ -45,7 +70,7 @@ export default function DeadAccountBanner({
               : `${accounts.length} contas do Instagram estão desconectadas`}
           </p>
           <p className="mt-0.5 text-sm text-foreground">
-            Nenhuma automação está enviando {since(accounts[0].tokenInvalidAt)}.
+            Nenhuma automação está enviando {since(accounts[0].tokenInvalidAt, now)}.
             Isso costuma acontecer quando a senha do Instagram muda ou a Meta
             derruba a sessão por segurança.
           </p>

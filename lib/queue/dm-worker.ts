@@ -483,25 +483,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
-    const usage = await reserveWorkspaceDMSend(automation.workspaceId);
-    if (!usage.allowed) {
-      await prisma.dmLog.update({
-        where: {
-          automationId_commentId: {
-            automationId: automation.id,
-            commentId,
-          },
-        },
-        data: {
-          status: "SKIPPED_PLAN_LIMIT",
-          matchedKeyword: matchResult.matchedKeyword,
-          errorMessage: `Monthly DM limit reached (${usage.limit})`,
-        },
-      });
-      continue;
-    }
-
-    // Token já marcado como morto: não adianta chamar a Meta. Sem esta trava,
+    // Token já marcado como morto: não adianta chamar a Meta. Fica ANTES de
+    // reservar a cota do mês de propósito — sair depois da reserva sem
+    // devolvê-la queimava cota por um DM que nunca saiu. Sem esta trava,
     // cada comentário gastava três tentativas (5, 15 e 45 min) batendo num
     // token que ia recusar as três — queimando rate limit da conta e CPU da VPS
     // enquanto o problema real esperava alguém reconectar.
@@ -527,6 +511,24 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "FAILED",
           errorMessage:
             "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar.",
+        },
+      });
+      continue;
+    }
+
+    const usage = await reserveWorkspaceDMSend(automation.workspaceId);
+    if (!usage.allowed) {
+      await prisma.dmLog.update({
+        where: {
+          automationId_commentId: {
+            automationId: automation.id,
+            commentId,
+          },
+        },
+        data: {
+          status: "SKIPPED_PLAN_LIMIT",
+          matchedKeyword: matchResult.matchedKeyword,
+          errorMessage: `Monthly DM limit reached (${usage.limit})`,
         },
       });
       continue;
@@ -1455,7 +1457,12 @@ async function processBroadcastRecipient(
           status: true,
           message: true,
           instagramAccount: {
-            select: { id: true, instagramId: true, accessToken: true },
+            select: {
+              id: true,
+              instagramId: true,
+              accessToken: true,
+              tokenInvalidAt: true,
+            },
           },
         },
       },
@@ -1487,20 +1494,26 @@ async function processBroadcastRecipient(
           ? { failedCount: { increment: 1 } }
           : { skippedCount: { increment: 1 } };
 
-    await prisma.$transaction([
-      prisma.broadcastRecipient.update({
-        where: { id: recipient.id },
-        data: {
-          status,
-          reason: reason ?? null,
-          ...(status === "SENT" ? { sentAt: new Date() } : {}),
-        },
-      }),
-      prisma.broadcast.update({
-        where: { id: broadcastId },
-        data: counter,
-      }),
-    ]);
+    // `updateMany` condicionado a PENDING, e não um `update` solto: se o BullMQ
+    // redistribuir um job travado, duas execuções podem chegar aqui para o mesmo
+    // destinatário. Com a condição, só a primeira resolve — a segunda escreve
+    // zero linhas e não incrementa o contador do envio.
+    //
+    // (Isto fecha a contagem dupla. O envio em si já saiu antes deste ponto, e
+    // proteger contra isso exigiria um estado "enviando" que, num processo
+    // morto no meio, deixaria o destinatário travado para sempre — remédio pior
+    // que a doença para um caso que depende do lock do BullMQ expirar.)
+    const claimed = await prisma.broadcastRecipient.updateMany({
+      where: { id: recipient.id, status: "PENDING" },
+      data: {
+        status,
+        reason: reason ?? null,
+        ...(status === "SENT" ? { sentAt: new Date() } : {}),
+      },
+    });
+    if (claimed.count === 0) return;
+
+    await prisma.broadcast.update({ where: { id: broadcastId }, data: counter });
 
     await closeBroadcastIfDone(broadcastId);
   };
@@ -1526,6 +1539,18 @@ async function processBroadcastRecipient(
   }
 
   const account = recipient.broadcast.instagramAccount;
+
+  // Token já morto: os destinatários restantes deste disparo tomariam a mesma
+  // recusa. Desistir aqui é o que impede um envio de 500 pessoas virar 500
+  // chamadas à Meta com um token que ela já recusou.
+  if (account.tokenInvalidAt) {
+    await finish(
+      "FAILED",
+      "A conta do Instagram está desconectada. Reconecte em Configurações para voltar a enviar."
+    );
+    return;
+  }
+
   if (!account.accessToken) {
     await finish("FAILED", "A conta do Instagram está sem token");
     return;

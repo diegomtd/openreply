@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockPrisma, mockSendDirectMessage, mockDecryptToken } = vi.hoisted(() => ({
   mockPrisma: {
-    broadcastRecipient: { findUnique: vi.fn(), update: vi.fn(), count: vi.fn() },
+    broadcastRecipient: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      count: vi.fn(),
+    },
     broadcast: { update: vi.fn(), updateMany: vi.fn() },
     instagramAccount: { findUnique: vi.fn(), updateMany: vi.fn() },
     operationalEvent: { create: vi.fn() },
@@ -92,14 +97,19 @@ function recipient(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** O status com que o destinatario foi finalizado. */
+/**
+ * O status com que o destinatario foi finalizado.
+ *
+ * Lido do `updateMany`, e nao do `update`: a finalizacao e condicionada a linha
+ * ainda estar PENDING, para dois jobs do mesmo destinatario nao contarem duas
+ * vezes no total do envio.
+ */
 function finishedStatus(): string | undefined {
-  const call = mockPrisma.broadcastRecipient.update.mock.calls[0]?.[0];
-  return call?.data?.status;
+  return mockPrisma.broadcastRecipient.updateMany.mock.calls[0]?.[0]?.data?.status;
 }
 
 function finishedReason(): string | undefined {
-  return mockPrisma.broadcastRecipient.update.mock.calls[0]?.[0]?.data?.reason;
+  return mockPrisma.broadcastRecipient.updateMany.mock.calls[0]?.[0]?.data?.reason;
 }
 
 beforeEach(() => {
@@ -111,6 +121,7 @@ beforeEach(() => {
   });
   mockPrisma.broadcastRecipient.findUnique.mockResolvedValue(recipient());
   mockPrisma.broadcastRecipient.update.mockResolvedValue({});
+  mockPrisma.broadcastRecipient.updateMany.mockResolvedValue({ count: 1 });
   mockPrisma.broadcastRecipient.count.mockResolvedValue(0);
   mockPrisma.broadcast.update.mockResolvedValue({});
   mockPrisma.broadcast.updateMany.mockResolvedValue({ count: 1 });
@@ -186,7 +197,7 @@ describe("Envio ativo — um destinatário", () => {
     await processor()(JOB);
 
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
-    expect(mockPrisma.broadcastRecipient.update).not.toHaveBeenCalled();
+    expect(mockPrisma.broadcastRecipient.updateMany).not.toHaveBeenCalled();
   });
 
   it("para de enviar quando o envio foi cancelado", async () => {
@@ -276,6 +287,44 @@ describe("Envio ativo — um destinatário", () => {
 
     expect(mockPrisma.instagramAccount.updateMany).not.toHaveBeenCalled();
     expect(finishedStatus()).toBe("FAILED");
+  });
+
+  it("não conta duas vezes quando outro job já resolveu o destinatário", async () => {
+    // Corrida real: o BullMQ pode redistribuir um job travado. A finalizacao e
+    // condicionada a linha ainda estar PENDING, entao a segunda execucao escreve
+    // zero linhas — e o total do envio nao pode ser incrementado por ela.
+    mockPrisma.broadcastRecipient.updateMany.mockResolvedValue({ count: 0 });
+
+    await processor()(JOB);
+
+    expect(mockPrisma.broadcastRecipient.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "rcp_1", status: "PENDING" },
+      })
+    );
+    expect(mockPrisma.broadcast.update).not.toHaveBeenCalled();
+  });
+
+  it("desiste sem chamar a Meta quando a conta já está desconectada", async () => {
+    // Um disparo de 500 pessoas com o token morto viraria 500 chamadas que a
+    // Meta ja recusou. A conta carrega o estado; o job so precisa lê-lo.
+    mockPrisma.broadcastRecipient.findUnique.mockResolvedValue(
+      recipient({
+        broadcast: {
+          ...recipient().broadcast,
+          instagramAccount: {
+            ...recipient().broadcast.instagramAccount,
+            tokenInvalidAt: new Date(),
+          },
+        },
+      })
+    );
+
+    await processor()(JOB);
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(finishedStatus()).toBe("FAILED");
+    expect(finishedReason()).toContain("desconectada");
   });
 
   it("ignora um job que aponta para outro envio", async () => {
