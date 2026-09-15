@@ -438,6 +438,63 @@ pegam, porque são de comportamento. Todos corrigidos:
 delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
 existe para evitar.
 
+## 5.9 Trocar de conta do Instagram (2026-09-15)
+
+A pessoa conectou um perfil **diferente** (`@appmaemind` no lugar de
+`@odiegoalves_`). Isso não é reconexão: o `upsert` do callback é por
+`instagramId`, então nasce uma **segunda** `InstagramAccount` no mesmo
+workspace, e a antiga continua lá com o token morto.
+
+Duas coisas quebravam exatamente nesse momento, e as duas só aparecem quando
+existe mais de uma conta — por isso passaram despercebidas até agora.
+
+### O seletor de conta que não movia nada
+
+`components/campaign-builder.tsx` mostra o seletor de conta quando
+`accounts.length > 1`, **inclusive ao editar**, e manda `instagramAccountId` no
+PATCH. Só que `updateAutomationSchema` não tinha esse campo, e um
+`z.object()` descarta chave desconhecida **em silêncio**: a tela dizia "salvo" e
+a automação continuava presa na conta antiga.
+
+Agora o PATCH aceita o campo, confere que a conta de destino é **do mesmo
+workspace** (o id vem do corpo da requisição — sem essa checagem daria para
+mover uma automação para a conta de outra pessoa), e decide o que fazer com o
+gatilho em `lib/automations/move-account.ts`:
+
+- **O post antigo não atravessa.** `postId` é uma mídia da conta de origem; na
+  conta de destino ela não existe, então nenhum comentário casaria. A automação
+  ficaria ativa na tela e muda na prática — pior que um erro, porque não parece
+  um erro. Só sobrevive um post escolhido de novo na mesma requisição.
+- **Sem gatilho, a mudança é recusada.** Se limpar o post não deixa nem DM, nem
+  story, nem "qualquer post", o PATCH devolve 400 em vez de salvar algo morto.
+- `matchAnyPost` e `pendingNextReel` sobrevivem: casam por conta, não por id de
+  mídia.
+
+### "Desconectar" apagava, e dizia que pausava
+
+O texto era *"As automações desta conta param de enviar DM."* O schema diz
+outra coisa: `Automation.instagramAccountId` é `onDelete: Cascade`, então
+desconectar **apaga** as automações e, por elas, os `DmLog`, os contatos, os
+links e os cliques daquela conta. Irreversível, descrito como pausa — e com uma
+conta morta na tela, é o botão que a pessoa mais tende a clicar.
+
+`GET /api/instagram/disconnect?instagramAccountId=…` agora devolve o que seria
+apagado (automações, contatos, registros de DM), e a confirmação diz o número
+antes de perguntar. Uma consulta por **clique no botão**, não por carregamento
+de tela.
+
+A alternativa de fundo — soft delete, guardando o histórico sem o token — não
+foi feita: mexeria em toda query que lê conta. Está no backlog; enquanto isso a
+tela fala a verdade.
+
+### O que a troca de conta NÃO leva junto
+
+Contatos, `DmLog`, cliques e a janela de 24h são por conta. O perfil novo
+começa do zero — inclusive a audiência alcançável do Envio ativo. Não é bug:
+a janela de 24h pertence à conversa com **aquele** perfil.
+
+---
+
 ### Limitações conhecidas do Envio ativo
 
 - **Não aparece em Registros.** `DmLog.automationId` é NOT NULL e um envio ativo
@@ -652,6 +709,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-15 | Troca de perfil do Instagram (`@odiegoalves_` → `@appmaemind`). Duas falhas que só existem com mais de uma conta: o seletor de conta do construtor mandava `instagramAccountId` no PATCH e o schema descartava em silêncio (automação ficava presa na conta antiga), e "Desconectar" dizia que pausava quando na verdade apaga em cascata automações, registros e contatos. PATCH passa a mover de conta com validação de workspace e limpeza do post da conta antiga (`lib/automations/move-account.ts`); a confirmação de desconexão passa a dizer o que será apagado, com número. Ver §5.9. |
 | 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
 | 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
 | 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |

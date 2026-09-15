@@ -6,6 +6,7 @@ import { calculateCtr, normalizeTopKeywords } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { buildReportUrl, generateReportShareSlug } from "@/lib/reports/share";
+import { planAccountMove } from "@/lib/automations/move-account";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -128,6 +129,10 @@ const createAutomationSchema = z
 const updateAutomationSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   goal: z.string().min(1).max(120).optional().nullable(),
+  /// Move a automação para outra conta conectada do mesmo workspace. Quem troca
+  /// de perfil do Instagram precisa disto: sem ele, a automação fica presa na
+  /// conta antiga e o construtor mostrava um seletor que não movia nada.
+  instagramAccountId: z.string().min(1).optional(),
   postId: z.string().min(1).optional().nullable(),
   postUrl: z.string().url().optional().nullable(),
   pendingNextReel: z.boolean().optional(),
@@ -602,6 +607,61 @@ export async function PATCH(request: NextRequest) {
     steps,
     ...automationData
   } = parsed.data;
+
+  // Troca de conta. Só entre contas do próprio workspace — o id vem do corpo da
+  // requisição, então sem esta checagem daria para mover uma automação para a
+  // conta de outra pessoa.
+  if (
+    automationData.instagramAccountId !== undefined &&
+    automationData.instagramAccountId !== existing.instagramAccountId
+  ) {
+    const targetAccount = await prisma.instagramAccount.findFirst({
+      where: { id: automationData.instagramAccountId, workspaceId },
+      select: { id: true },
+    });
+
+    if (!targetAccount) {
+      return NextResponse.json(
+        { success: false, error: "Conta do Instagram não encontrada neste workspace" },
+        { status: 400 }
+      );
+    }
+
+    const plan = planAccountMove(
+      {
+        postId: existing.postId,
+        matchAnyPost: existing.matchAnyPost,
+        pendingNextReel: existing.pendingNextReel,
+        dmTriggerEnabled: existing.dmTriggerEnabled,
+        storyReplyTriggerEnabled: existing.storyReplyTriggerEnabled,
+        storyMentionTriggerEnabled: existing.storyMentionTriggerEnabled,
+      },
+      {
+        postId: automationData.postId,
+        matchAnyPost: automationData.matchAnyPost,
+        pendingNextReel: automationData.pendingNextReel,
+        dmTriggerEnabled: automationData.dmTriggerEnabled,
+        storyReplyTriggerEnabled: automationData.storyReplyTriggerEnabled,
+        storyMentionTriggerEnabled: automationData.storyMentionTriggerEnabled,
+      }
+    );
+
+    if (!plan.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Escolha um post da nova conta, ou ligue um gatilho de DM ou story, antes de mudar a automação de conta",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (plan.clearPost) {
+      automationData.postId = null;
+      automationData.postUrl = null;
+    }
+  }
 
   if (automationData.requiredTags !== undefined) {
     automationData.requiredTags = normalizeTagList(automationData.requiredTags);

@@ -122,9 +122,38 @@ export default function SettingsPage() {
   }
 
   async function disconnectInstagram(instagramAccountId: string) {
+    // Desconectar apaga: as automações da conta saem junto, e com elas os
+    // registros de DM, os contatos e os cliques. O texto antigo dizia que as
+    // automações "param de enviar", o que fazia isto parecer reversível.
+    setBusy(`disconnect:${instagramAccountId}`);
+    const impactResponse = await fetch(
+      `/api/instagram/disconnect?instagramAccountId=${encodeURIComponent(
+        instagramAccountId
+      )}`
+    );
+    const impactPayload = await impactResponse.json().catch(() => null);
+    setBusy(null);
+
+    const impact = impactPayload?.success ? impactPayload.data : null;
+    const willDelete = impact
+      ? [
+          `${impact.automations} ${impact.automations === 1 ? "automação" : "automações"}`,
+          `${impact.contacts} ${impact.contacts === 1 ? "contato" : "contatos"}`,
+          `${impact.dmLogs} ${impact.dmLogs === 1 ? "registro de DM" : "registros de DM"}`,
+        ].join(", ")
+      : null;
+
     if (
       !confirm(
-        "Desconectar o Instagram? As automações desta conta param de enviar DM."
+        [
+          impact
+            ? `Desconectar @${impact.username} APAGA os dados dela.`
+            : "Desconectar APAGA os dados desta conta.",
+          willDelete ? `Vão junto: ${willDelete}.` : null,
+          "Isso não tem volta. Para só parar de enviar, desative as automações.",
+        ]
+          .filter(Boolean)
+          .join("\n\n")
       )
     ) {
       return;
