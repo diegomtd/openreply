@@ -35,6 +35,11 @@ const MESSAGES: Record<string, { tone: Tone; title: string; detail: string }> = 
     detail:
       "Essa conta do Instagram está ligada a outro workspace. Desconecte lá primeiro, ou conecte outra conta.",
   },
+  connected: {
+    tone: "success",
+    title: "Instagram conectado",
+    detail: "A conta já aparece na lista abaixo, pronta para automação.",
+  },
 };
 
 export function InstagramConnectNotice() {
