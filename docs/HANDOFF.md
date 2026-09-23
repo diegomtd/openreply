@@ -702,6 +702,8 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |
 | P3 | Flow builder visual | Só se o negócio realmente precisar de ramificação |
 | P3 | Integrações (Sheets, webhook de saída) | Depende de demanda |
+| P1 | Revisão do app na Meta (App Review) para Acesso Avançado — necessário para qualquer estranho conectar a própria conta sem ser cadastrado como testador | Checklist e texto de submissão prontos em `docs/meta-app-review.md`. O código já atende os pré-requisitos (`/privacy`, `/terms`, `/data-deletion`); falta o lado Meta (verificação de negócio, gravações, revisão). |
+| P2 | Workspace por cliente (multi-tenant de verdade) — hoje quem é convidado para um workspace vê todas as contas dele, sem isolar cliente por cliente | Só faz sentido quando o SaaS tiver clientes pagantes de fato. Ver nota final de `docs/meta-app-review.md`. |
 
 ---
 
@@ -709,6 +711,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-23 | Explicado como conectar contas do Instagram que não são do próprio Facebook do usuário (o app já usa Instagram API with Instagram Login — nunca precisou de Facebook) e o que falta para um SaaS onde qualquer cliente conecta a própria conta sozinho: Revisão do App da Meta para Acesso Avançado. Escrito `docs/meta-app-review.md` com o checklist e o texto de justificativa por permissão. Confirmado que o painel de controle de acesso (Configurações → Time, papéis Dono/Administrador/Membro) já existe e cobre 'criar contas de acesso'; documentado que ele é por workspace inteiro, não isola cliente por cliente — isso fica para quando o SaaS tiver clientes pagantes reais. |
 | 2026-09-15 | Troca de perfil do Instagram (`@odiegoalves_` → `@appmaemind`). Duas falhas que só existem com mais de uma conta: o seletor de conta do construtor mandava `instagramAccountId` no PATCH e o schema descartava em silêncio (automação ficava presa na conta antiga), e "Desconectar" dizia que pausava quando na verdade apaga em cascata automações, registros e contatos. PATCH passa a mover de conta com validação de workspace e limpeza do post da conta antiga (`lib/automations/move-account.ts`); a confirmação de desconexão passa a dizer o que será apagado, com número. Ver §5.9. |
 | 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
 | 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
