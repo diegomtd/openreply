@@ -438,6 +438,51 @@ pegam, porque são de comportamento. Todos corrigidos:
 delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
 existe para evitar.
 
+## 5.9.1 "Unsupported request - method type: get" ao conectar (2026-09-23)
+
+Depois de §5.9, a pessoa não conseguia conectar **nenhuma** conta nova — nem
+reconectar uma que já tinha funcionado antes (`@appmaemind`, que a própria
+Meta reconhecia: *"Você conectou anteriormente o app ConteudOS-IG"*). A tela
+de consentimento da Meta aparecia e aceitava normalmente; o erro só vinha
+**depois**, ao voltar para `/settings`, com `Unsupported request - method
+type: get` — uma mensagem genérica de roteamento da Meta, não um erro de
+permissão nem de conta bloqueada.
+
+A causa: `getLongLivedToken` (troca do token curto pelo de 60 dias) e
+`refreshLongLivedToken` (renovação, usada pelo cron `refresh-tokens`)
+montavam a URL como `https://graph.instagram.com/{versão}/access_token` —
+prefixando a versão da API, igual a todo outro endpoint deste cliente. Só
+que estes dois **não são versionados**: vivem na raiz,
+`https://graph.instagram.com/access_token` e `.../refresh_access_token`,
+confirmado na documentação oficial da Meta (Instagram API with Instagram
+Login → Business Login). A Meta não reconhece `/v25.0/access_token` como
+endpoint nenhum, e devolve esse erro genérico de método em vez de um erro
+de permissão de verdade — por isso não tinha cara de "URL errada".
+
+Isso explica todos os sintomas juntos:
+- Falhava **pela conta do próprio dono**, não só nas novas — não era limite
+  de testador nem de conta.
+- A Meta **aceitava** o login (a tela de consentimento apareceu) — a falha
+  era inteiramente do lado do OpenReply, depois da autorização.
+- As duas contas já conectadas tinham token válido porque a troca inicial
+  aconteceu antes desta regressão aparecer — mas o **cron de renovação**
+  (`/api/cron/refresh-tokens`) vinha batendo na mesma URL errada todo dia,
+  em silêncio (só grava `OperationalEvent`, não marca a conta como morta,
+  de propósito — ver §5.6, nem todo erro de renovação é token morto de
+  verdade). Sem o conserto, essas duas contas ficariam com o mesmo
+  problema da §5.6 quando o token de 60 dias vencesse de verdade, por volta
+  de novembro de 2026.
+
+Corrigido criando `instagramGraphRoot()`, separado de `instagramGraphBase()`
+(que continua versionado para todo o resto — `/me`, `/messages`,
+`/comments` etc.), e apontando só estes dois para a raiz. Travado com
+`__tests__/meta-client-endpoints.test.ts`: um teste por endpoint confirmando
+a URL exata, e um terceiro confirmando que `getUserInfo` continua
+versionado — para a diferença entre os dois grupos não desaparecer numa
+refatoração futura.
+
+---
+
 ## 5.9 Trocar de conta do Instagram (2026-09-15)
 
 A pessoa conectou um perfil **diferente** (`@appmaemind` no lugar de
@@ -711,6 +756,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-23 | Corrigido "Unsupported request - method type: get" ao conectar/reconectar qualquer conta do Instagram: `getLongLivedToken` e `refreshLongLivedToken` prefixavam a versão da API numa URL que a Meta serve sem versão, na raiz de `graph.instagram.com`. Não era permissão nem limite de testador — era a URL errada, e o mesmo bug rodava em silêncio todo dia no cron de renovação de token. Corrigido com `instagramGraphRoot()` separado do `instagramGraphBase()` versionado, travado com testes que fixam a URL exata de cada endpoint. Ver §5.9.1. |
 | 2026-09-23 | Explicado como conectar contas do Instagram que não são do próprio Facebook do usuário (o app já usa Instagram API with Instagram Login — nunca precisou de Facebook) e o que falta para um SaaS onde qualquer cliente conecta a própria conta sozinho: Revisão do App da Meta para Acesso Avançado. Escrito `docs/meta-app-review.md` com o checklist e o texto de justificativa por permissão. Confirmado que o painel de controle de acesso (Configurações → Time, papéis Dono/Administrador/Membro) já existe e cobre 'criar contas de acesso'; documentado que ele é por workspace inteiro, não isola cliente por cliente — isso fica para quando o SaaS tiver clientes pagantes reais. |
 | 2026-09-15 | Troca de perfil do Instagram (`@odiegoalves_` → `@appmaemind`). Duas falhas que só existem com mais de uma conta: o seletor de conta do construtor mandava `instagramAccountId` no PATCH e o schema descartava em silêncio (automação ficava presa na conta antiga), e "Desconectar" dizia que pausava quando na verdade apaga em cascata automações, registros e contatos. PATCH passa a mover de conta com validação de workspace e limpeza do post da conta antiga (`lib/automations/move-account.ts`); a confirmação de desconexão passa a dizer o que será apagado, com número. Ver §5.9. |
 | 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
