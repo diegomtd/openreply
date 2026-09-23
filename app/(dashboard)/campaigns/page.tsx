@@ -100,6 +100,37 @@ function frequencyLabel(auto: Campaign): string {
   }
 }
 
+/**
+ * O comportamento da automação em uma frase.
+ *
+ * Antes eram até seis selos lado a lado — gatilho, "também no DM", resposta de
+ * story, menção em story, condição de tag e frequência — todos do mesmo tamanho
+ * e da mesma cor. Seis coisas com o mesmo peso viram zero coisas: o olho não
+ * sabe onde pousar. Uma frase se lê de uma vez.
+ */
+function behaviorSummary(auto: Campaign): string {
+  const gatilhos = [triggerLabel(auto)];
+  if (auto.dmTriggerEnabled) gatilhos.push("DM");
+  if (auto.storyReplyTriggerEnabled) gatilhos.push("resposta de story");
+  if (auto.storyMentionTriggerEnabled) gatilhos.push("menção em story");
+  const base = `${gatilhos.join(" · ")} — ${frequencyLabel(auto)}`;
+  // "Exige seguir" muda quem recebe, entao pertence a frase de comportamento e
+  // nao a linha do titulo, que e so identidade (nome, conta, ligada ou nao).
+  return auto.requireFollow ? `${base} · exige seguir` : base;
+}
+
+/** As condições que mudam quem recebe, para o title do resumo. */
+function conditionsHint(auto: Campaign): string | undefined {
+  const partes: string[] = [];
+  if (auto.requiredTags?.length) {
+    partes.push(`só quem tem: ${auto.requiredTags.join(", ")}`);
+  }
+  if (auto.excludedTags?.length) {
+    partes.push(`nunca quem tem: ${auto.excludedTags.join(", ")}`);
+  }
+  return partes.length > 0 ? partes.join(" · ") : undefined;
+}
+
 export default function CampaignsPage() {
   const router = useRouter();
   const [automations, setAutomations] = useState<Campaign[]>([]);
@@ -511,11 +542,6 @@ export default function CampaignsPage() {
                       Esperando o próximo reel
                     </span>
                   )}
-                  {auto.requireFollow && (
-                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                      Exige seguir
-                    </span>
-                  )}
                   {auto.trackedLinks.length >= 2 && (
                     <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
                       2 links
@@ -523,59 +549,24 @@ export default function CampaignsPage() {
                   )}
                 </div>
 
-                {/* Gatilho e frequência: o resumo do comportamento, sem abrir */}
-                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full border border-border px-2 py-0.5 text-muted">
-                    {triggerLabel(auto)}
-                  </span>
-                  {auto.dmTriggerEnabled && (
-                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
-                      também no DM
+                {/* Comportamento: uma frase, nao seis selos disputando atencao */}
+                <p
+                  className="mb-2 text-xs text-muted"
+                  title={conditionsHint(auto)}
+                >
+                  {behaviorSummary(auto)}
+                  {conditionsHint(auto) && (
+                    <span className="ml-1.5 rounded-full bg-accent/10 px-1.5 py-0.5 text-accent">
+                      com condição
                     </span>
                   )}
-                  {auto.storyReplyTriggerEnabled && (
-                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
-                      resposta de story
-                    </span>
-                  )}
-                  {auto.storyMentionTriggerEnabled && (
-                    <span className="rounded-full border border-border px-2 py-0.5 text-muted">
-                      menção em story
-                    </span>
-                  )}
-                  {(auto.requiredTags?.length > 0 ||
-                    auto.excludedTags?.length > 0) && (
-                    <span
-                      className="rounded-full border border-border px-2 py-0.5 text-muted"
-                      title={[
-                        auto.requiredTags?.length
-                          ? `só quem tem: ${auto.requiredTags.join(", ")}`
-                          : "",
-                        auto.excludedTags?.length
-                          ? `nunca quem tem: ${auto.excludedTags.join(", ")}`
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    >
-                      condição de tag
-                    </span>
-                  )}
-                  <span
-                    className={`rounded-full px-2 py-0.5 font-medium ${
-                      auto.sendFrequency === "ALWAYS"
-                        ? "bg-amber-500/10 text-warning"
-                        : "bg-accent/10 text-accent"
-                    }`}
-                    title="Com que frequência a mesma pessoa pode receber esta automação"
-                  >
-                    {frequencyLabel(auto)}
-                  </span>
-                </div>
+                </p>
 
                 {/* Palavras-chave */}
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {auto.keywords.map((kw) => (
+                  {/* Teto de 4: uma automacao com doze palavras-chave enchia o
+                      cartao inteiro de selos e escondia a mensagem. */}
+                  {auto.keywords.slice(0, 4).map((kw) => (
                     <span
                       key={kw}
                       className="px-2 py-0.5 rounded-md bg-accent/10 text-accent text-xs font-medium border border-accent/10"
@@ -583,6 +574,14 @@ export default function CampaignsPage() {
                       {kw}
                     </span>
                   ))}
+                  {auto.keywords.length > 4 && (
+                    <span
+                      className="px-2 py-0.5 text-xs text-muted"
+                      title={auto.keywords.join(", ")}
+                    >
+                      +{auto.keywords.length - 4}
+                    </span>
+                  )}
                 </div>
 
                 {/* DM preview */}
@@ -595,28 +594,54 @@ export default function CampaignsPage() {
                   </p>
                 )}
 
-                {/* Stats */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs text-zinc-500">
-                  <span className="font-medium text-foreground">
-                    {auto._count.dmLogs} disparos
-                  </span>
-                  <span>·</span>
-                  <span className="font-medium text-foreground">
-                    {auto.analytics.ctr}% CTR
-                  </span>
-                  <span>·</span>
-                  <span>{auto.analytics.sent} enviados</span>
-                  <span>·</span>
-                  <span title="Quantos dos envios o Instagram confirmou como lidos">
-                    {auto.analytics.read ?? 0} lidos
-                  </span>
-                  <span>·</span>
-                  <span>{auto.analytics.skipped} pulados</span>
-                  <span>·</span>
-                  <span>{auto.analytics.failed} falhas</span>
-                  <span>·</span>
-                  <span>{auto.analytics.clicks} cliques</span>
-                </div>
+                {/* Números.
+                    Antes eram sete valores separados por ponto, todos do mesmo
+                    tamanho — e numa automação que nunca disparou, sete zeros.
+                    Agora só aparece o que tem algo a dizer, e falha aparece em
+                    vermelho: foi exatamente uma pilha de falhas que passou
+                    despercebida no meio dos pontinhos cinza. */}
+                {auto._count.dmLogs === 0 ? (
+                  <p className="mt-3 text-xs text-zinc-500">
+                    Ainda não disparou.
+                  </p>
+                ) : (
+                  <div className="mt-3 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-zinc-500">
+                    <span>
+                      <strong className="text-sm font-semibold text-foreground">
+                        {auto.analytics.sent}
+                      </strong>{" "}
+                      enviados
+                    </span>
+                    <span title="Quantos dos envios o Instagram confirmou como lidos">
+                      <strong className="text-foreground">
+                        {auto.analytics.read ?? 0}
+                      </strong>{" "}
+                      lidos
+                    </span>
+                    <span>
+                      <strong className="text-foreground">
+                        {auto.analytics.clicks}
+                      </strong>{" "}
+                      cliques
+                      {auto.analytics.sent > 0 && (
+                        <span className="ml-1 text-muted">
+                          ({auto.analytics.ctr}%)
+                        </span>
+                      )}
+                    </span>
+                    {auto.analytics.failed > 0 && (
+                      <span className="font-medium text-error">
+                        {auto.analytics.failed}{" "}
+                        {auto.analytics.failed === 1 ? "falha" : "falhas"}
+                      </span>
+                    )}
+                    {auto.analytics.skipped > 0 && (
+                      <span title="Envios bloqueados de propósito — a pessoa já recebeu, está em intervalo ou pediu para parar">
+                        {auto.analytics.skipped} pulados
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {auto.analytics.topKeywords.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">

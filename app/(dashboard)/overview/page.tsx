@@ -8,6 +8,7 @@
  * the insights permission); likes and comments are always available.
  */
 
+import ErrorState from "@/components/error-state";
 import { useEffect, useState } from "react";
 import AccountSelect from "@/components/account-select";
 import StatCard from "@/components/stat-card";
@@ -57,7 +58,7 @@ export default function OverviewPage() {
           setError(res.error ?? "Não foi possível carregar a análise");
         }
       })
-      .catch(() => setError("Failed to load overview"))
+      .catch(() => setError("Não foi possível falar com o servidor"))
       .finally(() => setLoading(false));
   }, [selectedAccountId, count]);
 
@@ -85,19 +86,9 @@ export default function OverviewPage() {
   }
 
   if (error) {
-    return (
-      <div className="panel rounded p-8 text-center">
-        <p className="text-sm text-error">{error}</p>
-        {error.includes("connect") && (
-          <a
-            href="/api/instagram/connect"
-            className="mt-4 inline-block text-sm text-accent hover:underline"
-          >
-            Connect Instagram
-          </a>
-        )}
-      </div>
-    );
+    // A tela nao esta "corrompida" quando isto aparece: quase sempre e o token
+    // do Instagram que morreu, e a resposta e reconectar. ErrorState diz isso.
+    return <ErrorState error={error} onRetry={() => window.location.reload()} />;
   }
 
   if (!data) return null;

@@ -10,6 +10,7 @@
  * surfaced verbatim when it applies.
  */
 
+import ErrorState from "@/components/error-state";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
@@ -285,7 +286,9 @@ export default function InboxPage() {
             {convLoading ? (
               <p className="px-4 py-6 text-sm text-muted">Carregando…</p>
             ) : convError ? (
-              <p className="px-4 py-6 text-sm text-error">{convError}</p>
+              <div className="px-3 py-4">
+                <ErrorState error={convError} />
+              </div>
             ) : conversations.length === 0 ? (
               <p className="px-4 py-6 text-sm text-muted">Nenhuma conversa ainda.</p>
             ) : (

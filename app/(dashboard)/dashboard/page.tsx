@@ -141,15 +141,46 @@ export default function DashboardPage() {
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+        {/* Todo número leva para a lista que o explica: "4 falhas" só serve se
+            der para perguntar quais. */}
         <StatCard
           label="Automações ativas"
           value={stats?.activeAutomations ?? 0}
+          href="/campaigns"
         />
-        <StatCard label="DMs enviados no mês" value={stats?.dmsSentMonth ?? 0} />
-        <StatCard label="Pulados" value={stats?.dmsSkippedMonth ?? 0} />
-        <StatCard label="Falhas" value={stats?.dmsFailedMonth ?? 0} />
-        <StatCard label="Cliques" value={stats?.clicksThisMonth ?? 0} />
-        <StatCard label="CTR" value={`${stats?.ctrThisMonth ?? 0}%`} />
+        <StatCard
+          label="DMs enviados no mês"
+          value={stats?.dmsSentMonth ?? 0}
+          href="/logs?status=SENT"
+        />
+        <StatCard
+          label="Pulados"
+          value={stats?.dmsSkippedMonth ?? 0}
+          hint="Bloqueados de propósito"
+          href="/logs?status=SKIPPED_ALREADY_SENT"
+        />
+        <StatCard
+          label="Falhas"
+          value={stats?.dmsFailedMonth ?? 0}
+          // Falha em vermelho, e só quando existe: um número ruim pintado igual
+          // a um bom não é lido como ruim.
+          tone={(stats?.dmsFailedMonth ?? 0) > 0 ? "alert" : "default"}
+          hint={
+            (stats?.dmsFailedMonth ?? 0) > 0 ? "Toque para ver o motivo" : undefined
+          }
+          href="/logs?status=FAILED"
+        />
+        <StatCard
+          label="Cliques"
+          value={stats?.clicksThisMonth ?? 0}
+          href="/overview"
+        />
+        <StatCard
+          label="CTR"
+          value={`${stats?.ctrThisMonth ?? 0}%`}
+          hint="Cliques por DM enviado"
+          href="/overview"
+        />
       </div>
 
       {/* Chart + Recent Activity */}

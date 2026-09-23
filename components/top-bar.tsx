@@ -12,6 +12,7 @@ const pageTitles: Record<string, string> = {
   "/dashboard": "Início",
   "/inbox": "Caixa de entrada",
   "/contacts": "Contatos",
+  "/broadcasts": "Envio ativo",
   "/campaigns": "Automações",
   "/campaigns/new": "Nova automação",
   "/campaigns/import": "Importar automações",

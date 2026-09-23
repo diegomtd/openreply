@@ -56,6 +56,12 @@ const navGroups: { heading: string | null; items: NavItem[] }[] = [
         hint: "Palavra-chave no comentário ou no DM",
       },
       {
+        label: "Envio ativo",
+        href: "/broadcasts",
+        icon: "M6 12 3.75 4.5l16.5 7.5-16.5 7.5L6 12Zm0 0h6",
+        hint: "Mensagem para quem está dentro da janela de 24h",
+      },
+      {
         label: "Análise",
         href: "/overview",
         icon: "M3.75 20.25h16.5M7.5 20.25V11.25m4.5 9V4.5m4.5 15.75v-6.75",

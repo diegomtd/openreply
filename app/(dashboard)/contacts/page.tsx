@@ -29,6 +29,7 @@ interface Contact {
   optedOutReason: string | null;
   tags: string[];
   instagramAccount: { username: string };
+  sourceAutomation: { id: string; name: string } | null;
   automationStates: ContactAutomation[];
 }
 
@@ -54,6 +55,27 @@ function formatDate(value: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Quanto falta da janela de 24h desta pessoa.
+ *
+ * É o que separa "dá para falar com ela agora" de "só quando ela escrever de
+ * novo" — a mesma regra que manda no Envio ativo, aqui por linha.
+ */
+function windowLabel(lastInboundAt: string | null): {
+  open: boolean;
+  text: string;
+} {
+  if (!lastInboundAt) return { open: false, text: "nunca escreveu" };
+  const closesAt = new Date(lastInboundAt).getTime() + 24 * 60 * 60 * 1000;
+  const minutes = Math.round((closesAt - Date.now()) / 60000);
+  if (minutes <= 0) return { open: false, text: "janela fechada" };
+  const hours = Math.floor(minutes / 60);
+  return {
+    open: true,
+    text: hours > 0 ? `janela aberta · ${hours}h` : `janela aberta · ${minutes}min`,
+  };
 }
 
 export default function ContactsPage() {
@@ -267,6 +289,9 @@ export default function ContactsPage() {
                   Última mensagem dela
                 </th>
                 <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
+                  Chegou por
+                </th>
+                <th className="px-4 py-4 text-xs font-semibold text-muted uppercase tracking-wider sm:px-6">
                   Ações
                 </th>
               </tr>
@@ -275,7 +300,7 @@ export default function ContactsPage() {
               {loading &&
                 [...Array(5)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={7} className="px-4 py-4 sm:px-6">
+                    <td colSpan={8} className="px-4 py-4 sm:px-6">
                       <div className="h-4 rounded bg-surface-hover" />
                     </td>
                   </tr>
@@ -284,7 +309,7 @@ export default function ContactsPage() {
               {!loading && contacts.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-12 text-center text-muted sm:px-6"
                   >
                     {debouncedSearch || filter !== "all"
@@ -342,6 +367,21 @@ export default function ContactsPage() {
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-muted sm:px-6">
                         {formatDate(contact.lastInboundAt)}
+                        {(() => {
+                          const state = windowLabel(contact.lastInboundAt);
+                          return (
+                            <span
+                              className={`block text-xs ${
+                                state.open ? "text-emerald-400" : "text-zinc-500"
+                              }`}
+                            >
+                              {state.text}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-muted sm:px-6">
+                        {contact.sourceAutomation?.name ?? "—"}
                       </td>
                       <td className="px-4 py-4 sm:px-6">
                         <div className="flex items-center gap-3">
@@ -368,7 +408,7 @@ export default function ContactsPage() {
 
                     {expanded === contact.id && (
                       <tr className="bg-surface/40">
-                        <td colSpan={7} className="px-4 py-4 sm:px-6">
+                        <td colSpan={8} className="px-4 py-4 sm:px-6">
                           {contact.optedOut && (
                             <p className="mb-3 text-xs text-warning">
                               Silenciado —{" "}

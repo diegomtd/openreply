@@ -419,6 +419,17 @@ export async function recordAutomationSend(params: {
         ...(commenterName ? { username: commenterName } : {}),
       },
     }),
+    // A origem: a primeira automação que de fato falou com esta pessoa.
+    //
+    // `updateMany` com `sourceAutomationId: null` no where, e não um `update`,
+    // porque a gravação tem que ser "só se ainda estiver vazia" — origem é sobre
+    // de onde a pessoa veio, então o segundo envio nunca pode sobrescrever o
+    // primeiro. Como condição e escrita vão na mesma instrução, dois envios
+    // simultâneos não conseguem se atropelar.
+    prisma.contact.updateMany({
+      where: { id: contactId, sourceAutomationId: null },
+      data: { sourceAutomationId: automationId },
+    }),
   ]);
 }
 

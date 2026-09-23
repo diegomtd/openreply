@@ -101,6 +101,11 @@ export async function GET(request: NextRequest) {
         accessToken: encryptedToken,
         tokenExpiresAt,
         webhookSubscribed,
+        // Reconectou: a conta voltou a funcionar, então o aviso de token morto
+        // sai da tela. Deixá-lo aceso depois de um token novo entrar seria o app
+        // mentindo sobre o próprio estado.
+        tokenInvalidAt: null,
+        tokenInvalidReason: null,
       },
     });
 

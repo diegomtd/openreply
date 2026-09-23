@@ -298,6 +298,331 @@ lido como "ninguém abriu".
 
 `analytics.readRate` é lido/enviado; `analytics.ctr` é clique/enviado.
 
+## 5.5 Envio ativo (janela de 24h) — como funciona
+
+O que o Instagram **não** permite, confirmado na política oficial da Meta:
+
+- One-Time Notifications: "not available for IG Messaging API".
+- Sponsored Messages: "not available for IG Messaging API".
+- As message tags de marketing do Messenger não existem no Instagram. Desde
+  27/04/2026, `CONFIRMED_EVENT_UPDATE`, `ACCOUNT_UPDATE` e `POST_PURCHASE_UPDATE`
+  respondem erro 100.
+- `HUMAN_AGENT` dá 7 dias, mas é para **humano respondendo à mão**. Em envio
+  automatizado é violação de política e a API bloqueia.
+
+Então "disparo para a base" não existe aqui. O que existe é envio para a
+**audiência rolante**: quem mandou mensagem nas últimas 24h. Quem abre janela é
+DM, resposta a story e menção em story — **comentário não abre**, e é por isso
+que `processComment` não mexe em `lastInboundAt` e `processMessage` mexe.
+
+- `lib/broadcast/window.ts` — a regra das 24h num lugar só: `windowState`,
+  `isWindowOpen`, `windowCutoff`. A tela, a prévia e o worker usam o mesmo corte,
+  senão a contagem mentiria em relação às linhas.
+- `lib/broadcast/audience.ts` — o `where`. O filtro de janela é montado **dentro**
+  da função, não recebido de fora: não pode existir caminho que o desligue.
+- `/api/broadcasts/preview` — devolve `reachable`, `expiringSoon`, `total` e
+  `outOfWindow`. Os quatro juntos de propósito: só o `reachable` pareceria filtro
+  quebrado; com o resto do lado, a regra da Meta fica explicada em vez de
+  escondida.
+- `/api/broadcasts` POST — grava `Broadcast` + `BroadcastRecipient` e enfileira
+  **um job por destinatário**, espaçados por `BROADCAST_SPACING_MS` (1,5s). Um job
+  único varrendo centenas de contatos prenderia o worker de 1 core e morreria
+  inteiro no primeiro soluço da Meta. Teto de 500 por envio.
+- O worker **reconfere a janela na vez de cada pessoa**: com o espaçamento, o
+  último da fila chega bem depois do primeiro e a janela dele pode ter fechado.
+  Pulo vira `SKIPPED_WINDOW_CLOSED` com motivo, nunca silêncio.
+- `@@unique([broadcastId, contactId])` é o que torna o job idempotente: retry do
+  BullMQ não manda a mesma mensagem duas vezes.
+- Só owner/admin dispara. A tela pede confirmação em duas etapas, e a confirmação
+  guarda a **assinatura dos filtros** — mexeu em qualquer coisa, ela expira. Não
+  existe "des-enviar" um DM.
+
+### Origem do contato
+
+`Contact.sourceAutomationId` é a **primeira** automação que de fato falou com a
+pessoa. Gravada em `recordAutomationSend` com `updateMany` condicionado a
+`sourceAutomationId: null` — condição e escrita na mesma instrução, então o
+segundo envio nunca sobrescreve o primeiro e dois envios simultâneos não se
+atropelam. A migration faz backfill com `DISTINCT ON` sobre o `DmLog`, contando
+só `SENT`: uma automação que tentou e falhou não trouxe ninguém.
+
+---
+
+## 5.6 Token morto — o incidente e a protecao
+
+Em 2026-09-09, das 20:20 as 20:48, a Meta invalidou o token da conta
+(`Error validating access token: The session has been invalidated because the
+user changed their password or Facebook has changed the session for security
+reasons`). O app falhou o tempo todo **em silencio**: seguidoras reais
+comentaram e nao receberam nada.
+
+A causa nao foi o erro em si, foi o app nao ter estado para ele. `TokenExpiredError`
+ja era lancado no erro 190 — e nada era feito com ele. `tokenExpiresAt` nao
+cobre este caso: o token e invalidado **na hora** quando a senha do Instagram
+muda ou a Meta derruba a sessao, muito antes da data de expiracao.
+
+- `InstagramAccount.tokenInvalidAt` / `tokenInvalidReason`.
+- Gravado com `updateMany` condicionado a `tokenInvalidAt: null`: a primeira
+  falha registra o horario, as seguintes nao o empurram. Interessa **desde
+  quando** esta quebrado.
+- `components/dead-account-banner.tsx` no topo de toda tela, **fora da area
+  rolavel** — com o token morto nada funciona, entao o aviso nao pode sair de
+  vista ao rolar.
+- O worker desiste rapido quando a conta esta marcada. Sem isso, cada comentario
+  gastava tres tentativas (5, 15 e 45 min) contra um token que ia recusar as
+  tres, queimando rate limit e CPU.
+- O callback do OAuth limpa o estado ao reconectar.
+- **Rate limit nao marca a conta.** Ele passa sozinho; pedir reconexao por causa
+  dele mandaria a pessoa refazer login a toa.
+- `lib/ui/api-error.ts` traduz o erro cru para o que houve, por que, e o botao
+  que resolve. O mesmo erro aparece em quatro telas e a resposta e a mesma nas
+  quatro.
+- **E-mail para o dono quando a conta cai** (`lib/email/send.ts`). Um alerta que
+  so existe numa tela que ninguem abre nao e alerta — foi exatamente assim que
+  meia hora de falha passou despercebida.
+
+### Por que o e-mail nao vira spam
+
+`markTokenInvalid` ja usava `updateMany` condicionado a `tokenInvalidAt: null`.
+Essa mesma condicao da o "avisar uma vez so": `count === 1` significa que **esta**
+chamada foi a que marcou, ou seja, e um incidente novo. As dezenas de falhas
+seguintes escrevem zero linhas e nao mandam e-mail nenhum. Sem isso, meia hora de
+automacao falhando viraria meia hora de e-mails.
+
+O envio e best-effort e nunca lanca: quem chama isso esta no meio de tratar um
+problema, e falhar ao **avisar** sobre o problema nao pode virar um segundo
+problema. Sem `RESEND_API_KEY` configurada ele desiste em silencio — numa
+instalacao propria e-mail e opcional, e o aviso na tela continua de pe.
+
+---
+
+## 5.7 Passada de UI depois do primeiro uso real (2026-09-10)
+
+O que o uso real mostrou, e o que mudou:
+
+- **Automacoes** eram ate seis selos lado a lado (gatilho, DM, story, mencao,
+  condicao, frequencia) mais palavras-chave soltas mais sete metricas separadas
+  por ponto — quinze elementos do mesmo peso. Seis coisas com o mesmo peso viram
+  zero coisas. Agora: uma frase de comportamento, palavras-chave com teto de 4, e
+  numeros so quando dizem algo. **Falha aparece em vermelho** — foi uma pilha de
+  falhas perdida no meio dos pontinhos cinza que deixou o token morto invisivel.
+- **Registros**: o motivo era truncado exatamente onde a informacao comecava,
+  atras de um `title` que ninguem descobre. Agora a linha abre e mostra o
+  comentario, a explicacao humana, o botao de acao quando existe, e a mensagem
+  crua por ultimo.
+- **Inicio**: cada numero leva para a lista que o explica (`/logs?status=...`).
+  A tela de Registros passou a ler `?status` da URL, validado contra a lista
+  conhecida.
+- **Caixa de entrada e Analise** mostravam a string crua da Meta, em ingles.
+  Agora usam `ErrorState`.
+
+---
+
+## 5.8 Revisão de código do Envio ativo (2026-09-10)
+
+Uma revisão no diff inteiro achou oito defeitos que testes e typecheck não
+pegam, porque são de comportamento. Todos corrigidos:
+
+| Defeito | Por que importava |
+|---|---|
+| Trava de token morto **depois** de `reserveWorkspaceDMSend`, saindo sem devolver | Queimava cota mensal por DM que nunca saiu. Movida para **antes** de reservar. |
+| `processBroadcastRecipient` não lia `tokenInvalidAt` | O comentário prometia que o disparo pararia; o código não fazia. 500 destinatários virariam 500 chamadas que a Meta já recusou. |
+| Destinatários reordenados por `createdAt` | `createMany` carimba o **mesmo** instante em todas as linhas, então a ordem "quem sai da janela primeiro" era arbitrária — e o mais urgente podia ficar por último e ser pulado. Agora ordena por `windowClosesAt`. |
+| POST repetido criava outro envio | Duplo clique, retry de rede ou refresh mandava tudo de novo, e não existe des-enviar um DM. `Broadcast.requestId` único, checado na aplicação **e** garantido pelo banco. |
+| Finalização com `update` solto | Dois jobs do mesmo destinatário (job travado redistribuído pelo BullMQ) contavam duas vezes. Agora `updateMany` condicionado a `status: PENDING`. |
+| Tela ignorava `truncated` | Um envio cortado no teto de 500 parecia ter alcançado todo mundo, e quem ficou de fora sai da janela antes de uma segunda tentativa. |
+| `?status=` lido no inicializador do `useState` | Incompatibilidade de hidratação no caminho que os cartões do Início passaram a usar. Movido para efeito pós-montagem. |
+| `Date.now()` no banner durante SSR | Servidor e cliente discordavam na virada do minuto. Primeira renderização mostra horário absoluto; o relativo entra ao montar. |
+
+`BROADCAST_SPACING_MS` também ganhou guarda: `Math.max(200, NaN)` é `NaN`, e um
+delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
+existe para evitar.
+
+## 5.9.2 Login com e-mail e senha (2026-09-23)
+
+Até aqui o único jeito de entrar era o link mágico por e-mail (Resend). Isso
+trava dois casos reais: entregar acesso a alguém sem esperar e-mail nenhum
+chegar (WhatsApp, em mão), e simplesmente preferir senha. Adicionado como
+**segunda opção**, nunca substituindo o link mágico.
+
+### Por que trocou a estratégia de sessão
+
+O Credentials provider do Auth.js só funciona com sessão em **JWT** — é uma
+restrição do próprio Auth.js, documentada como erro fixo
+(`errors.authjs.dev#unsupportedstrategy`), não uma escolha de projeto. A
+sessão em banco (`strategy: "database"`) virou `strategy: "jwt"` para o app
+inteiro. O adapter (`PrismaAdapter`) continua no lugar e continua sendo
+usado pelo link mágico do mesmo jeito — grava `User`/`Account`/
+`VerificationToken` normalmente; só a sessão em si passou de uma linha na
+tabela `Session` para um cookie assinado.
+
+**Isto não muda quem pode fazer o quê.** Toda checagem de permissão deste
+app já relê o cargo do banco a cada requisição
+(`getCurrentWorkspaceContext` → `prisma.workspaceMember.findFirst`) — nunca
+confiou em nada dentro da sessão além do id do usuário. Remover o membro do
+workspace continua cortando o acesso na próxima requisição, sessão JWT ou
+não.
+
+### Senha: scrypt do próprio `node:crypto`, sem dependência nova
+
+`lib/auth/password.ts` — mesmo princípio de `lib/meta/oauth.ts` (cifra o
+token do Instagram sem puxar biblioteca externa). `scrypt` é lento de
+propósito: é a defesa contra força bruta se o banco vazar algum dia.
+
+- `hashPassword` / `verifyPassword`: salt aleatório de 16 bytes por senha,
+  `timingSafeEqual` na comparação.
+- **`verifyPassword` roda o scrypt mesmo quando não existe hash nenhum**
+  (e-mail que não existe, ou existe mas só usa o link mágico) — contra um
+  salt fixo, só para gastar o mesmo tempo. Sem isso, o tempo de resposta
+  já entregaria se aquele e-mail tem senha cadastrada, sem precisar acertar
+  senha nenhuma.
+- **Limite de tentativas** (`lib/auth/login-rate-limit.ts`): 8 tentativas
+  erradas por e-mail em 15 minutos, Redis simples (`INCR` + `EXPIRE`) — não
+  precisa ser atômico feito a cota de DM
+  (`lib/utils/rate-limiter.ts`); perder uma corrida rara aqui deixa passar
+  UMA tentativa a mais, não uma cota de negócio.
+- O login por senha nunca teve essa superfície de ataque antes — o link
+  mágico é um token de uso único, não dá pra "adivinhar".
+
+### Dois jeitos de ganhar uma senha
+
+1. **Trocar a própria** (Configurações → Sua senha, qualquer pessoa
+   logada): quem só tinha o link mágico ganha senha também; quem já tem
+   senha precisa confirmar a atual antes de trocar — quem nunca teve, não
+   precisa confirmar nada, porque chegar autenticado já provou dono do
+   e-mail.
+2. **Acesso direto** (Configurações → Time → Acesso direto, só
+   dono/administrador): cria e-mail + senha temporária na hora — a senha
+   aparece **uma vez só** na tela, para copiar e entregar por fora do
+   e-mail. Chamar de novo para o mesmo e-mail reseta a senha dele, de
+   propósito (serve tanto para criar quanto para resetar).
+
+### O que NÃO mudou
+
+- O link mágico continua sendo o caminho de recuperação: esqueceu a senha,
+  entra pelo link (mesmo e-mail já prova dono da conta) e troca em
+  Configurações. Não existe fluxo de "esqueci a senha" separado, de
+  propósito — reaproveita o que já existe em vez de duplicar.
+- `events.createUser` (que cria o workspace automático) só dispara para
+  contas criadas pelo adapter (link mágico, OAuth) — uma conta de acesso
+  direto já nasce com workspace explícito (o do administrador que criou),
+  então não passa por ali.
+
+---
+
+## 5.9.1 "Unsupported request - method type: get" ao conectar (2026-09-23)
+
+Depois de §5.9, a pessoa não conseguia conectar **nenhuma** conta nova — nem
+reconectar uma que já tinha funcionado antes (`@appmaemind`, que a própria
+Meta reconhecia: *"Você conectou anteriormente o app ConteudOS-IG"*). A tela
+de consentimento da Meta aparecia e aceitava normalmente; o erro só vinha
+**depois**, ao voltar para `/settings`, com `Unsupported request - method
+type: get` — uma mensagem genérica de roteamento da Meta, não um erro de
+permissão nem de conta bloqueada.
+
+A causa: `getLongLivedToken` (troca do token curto pelo de 60 dias) e
+`refreshLongLivedToken` (renovação, usada pelo cron `refresh-tokens`)
+montavam a URL como `https://graph.instagram.com/{versão}/access_token` —
+prefixando a versão da API, igual a todo outro endpoint deste cliente. Só
+que estes dois **não são versionados**: vivem na raiz,
+`https://graph.instagram.com/access_token` e `.../refresh_access_token`,
+confirmado na documentação oficial da Meta (Instagram API with Instagram
+Login → Business Login). A Meta não reconhece `/v25.0/access_token` como
+endpoint nenhum, e devolve esse erro genérico de método em vez de um erro
+de permissão de verdade — por isso não tinha cara de "URL errada".
+
+Isso explica todos os sintomas juntos:
+- Falhava **pela conta do próprio dono**, não só nas novas — não era limite
+  de testador nem de conta.
+- A Meta **aceitava** o login (a tela de consentimento apareceu) — a falha
+  era inteiramente do lado do OpenReply, depois da autorização.
+- As duas contas já conectadas tinham token válido porque a troca inicial
+  aconteceu antes desta regressão aparecer — mas o **cron de renovação**
+  (`/api/cron/refresh-tokens`) vinha batendo na mesma URL errada todo dia,
+  em silêncio (só grava `OperationalEvent`, não marca a conta como morta,
+  de propósito — ver §5.6, nem todo erro de renovação é token morto de
+  verdade). Sem o conserto, essas duas contas ficariam com o mesmo
+  problema da §5.6 quando o token de 60 dias vencesse de verdade, por volta
+  de novembro de 2026.
+
+Corrigido criando `instagramGraphRoot()`, separado de `instagramGraphBase()`
+(que continua versionado para todo o resto — `/me`, `/messages`,
+`/comments` etc.), e apontando só estes dois para a raiz. Travado com
+`__tests__/meta-client-endpoints.test.ts`: um teste por endpoint confirmando
+a URL exata, e um terceiro confirmando que `getUserInfo` continua
+versionado — para a diferença entre os dois grupos não desaparecer numa
+refatoração futura.
+
+---
+
+## 5.9 Trocar de conta do Instagram (2026-09-15)
+
+A pessoa conectou um perfil **diferente** (`@appmaemind` no lugar de
+`@odiegoalves_`). Isso não é reconexão: o `upsert` do callback é por
+`instagramId`, então nasce uma **segunda** `InstagramAccount` no mesmo
+workspace, e a antiga continua lá com o token morto.
+
+Duas coisas quebravam exatamente nesse momento, e as duas só aparecem quando
+existe mais de uma conta — por isso passaram despercebidas até agora.
+
+### O seletor de conta que não movia nada
+
+`components/campaign-builder.tsx` mostra o seletor de conta quando
+`accounts.length > 1`, **inclusive ao editar**, e manda `instagramAccountId` no
+PATCH. Só que `updateAutomationSchema` não tinha esse campo, e um
+`z.object()` descarta chave desconhecida **em silêncio**: a tela dizia "salvo" e
+a automação continuava presa na conta antiga.
+
+Agora o PATCH aceita o campo, confere que a conta de destino é **do mesmo
+workspace** (o id vem do corpo da requisição — sem essa checagem daria para
+mover uma automação para a conta de outra pessoa), e decide o que fazer com o
+gatilho em `lib/automations/move-account.ts`:
+
+- **O post antigo não atravessa.** `postId` é uma mídia da conta de origem; na
+  conta de destino ela não existe, então nenhum comentário casaria. A automação
+  ficaria ativa na tela e muda na prática — pior que um erro, porque não parece
+  um erro. Só sobrevive um post escolhido de novo na mesma requisição.
+- **Sem gatilho, a mudança é recusada.** Se limpar o post não deixa nem DM, nem
+  story, nem "qualquer post", o PATCH devolve 400 em vez de salvar algo morto.
+- `matchAnyPost` e `pendingNextReel` sobrevivem: casam por conta, não por id de
+  mídia.
+
+### "Desconectar" apagava, e dizia que pausava
+
+O texto era *"As automações desta conta param de enviar DM."* O schema diz
+outra coisa: `Automation.instagramAccountId` é `onDelete: Cascade`, então
+desconectar **apaga** as automações e, por elas, os `DmLog`, os contatos, os
+links e os cliques daquela conta. Irreversível, descrito como pausa — e com uma
+conta morta na tela, é o botão que a pessoa mais tende a clicar.
+
+`GET /api/instagram/disconnect?instagramAccountId=…` agora devolve o que seria
+apagado (automações, contatos, registros de DM), e a confirmação diz o número
+antes de perguntar. Uma consulta por **clique no botão**, não por carregamento
+de tela.
+
+A alternativa de fundo — soft delete, guardando o histórico sem o token — não
+foi feita: mexeria em toda query que lê conta. Está no backlog; enquanto isso a
+tela fala a verdade.
+
+### O que a troca de conta NÃO leva junto
+
+Contatos, `DmLog`, cliques e a janela de 24h são por conta. O perfil novo
+começa do zero — inclusive a audiência alcançável do Envio ativo. Não é bug:
+a janela de 24h pertence à conversa com **aquele** perfil.
+
+---
+
+### Limitações conhecidas do Envio ativo
+
+- **Não aparece em Registros.** `DmLog.automationId` é NOT NULL e um envio ativo
+  não tem automação, então não dá para gravar lá sem tornar a coluna nula. O
+  histórico dele fica na própria tela de Envio ativo.
+- **Não conta na cota mensal** (`reserveWorkspaceDMSend`). Pouco relevante numa
+  instalação própria, onde o limite de plano não é o gargalo, mas é uma
+  diferença real em relação às automações.
+
+---
+
 ## 6. Decisões de arquitetura (e por quê)
 
 | # | Decisão | Motivo |
@@ -494,6 +819,10 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 | P2 | Editor de mensagem em blocos (texto/imagem/botões) | Passo antes de qualquer canvas |
 | P3 | Flow builder visual | Só se o negócio realmente precisar de ramificação |
 | P3 | Integrações (Sheets, webhook de saída) | Depende de demanda |
+| P1 | Revisão do app na Meta (App Review) para Acesso Avançado — necessário para qualquer estranho conectar a própria conta sem ser cadastrado como testador | Checklist e texto de submissão prontos em `docs/meta-app-review.md`. O código já atende os pré-requisitos (`/privacy`, `/terms`, `/data-deletion`); falta o lado Meta (verificação de negócio, gravações, revisão). |
+| P2 | Workspace por cliente (multi-tenant de verdade) — hoje quem é convidado para um workspace vê todas as contas dele, sem isolar cliente por cliente | Só faz sentido quando o SaaS tiver clientes pagantes de fato. Ver nota final de `docs/meta-app-review.md`. |
+| P2 | Marca como configuração (nome, cor, logo) em vez de espalhada pelo código — pré-requisito para revender white-label sem editar código a cada cliente | Ver `docs/whitelabel-saas-gaps.md`, seção White-label. |
+| P3 | Cobrança por uso (planos, Stripe, teto por plano em cima de `dmsSentThisPeriod`) | Só faz sentido junto com o isolamento por cliente — sem isolamento, cobrar por workspace cobraria do time errado. |
 
 ---
 
@@ -501,6 +830,14 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-23 | Login com e-mail e senha, como segunda opção ao lado do link mágico: `lib/auth/password.ts` (scrypt do node:crypto, sem dependência nova), limite de tentativas em Redis, sessão trocada para JWT (exigência do Credentials provider do Auth.js, não muda quem pode fazer o quê — cada checagem já relê o cargo do banco). Duas telas novas em Configurações: trocar a própria senha, e criar acesso direto (e-mail + senha na hora, sem e-mail nenhum, só dono/administrador). Ver §5.9.2. Também escrito `docs/whitelabel-saas-gaps.md` — o que já está pronto para vender como white-label ou SaaS, o que falta em cada caminho, e as oportunidades que não são óbvias (a métrica de uso já existe, só falta o preço em cima; o e-mail de conta caída é retenção sem querer). |
+| 2026-09-23 | Corrigido "Unsupported request - method type: get" ao conectar/reconectar qualquer conta do Instagram: `getLongLivedToken` e `refreshLongLivedToken` prefixavam a versão da API numa URL que a Meta serve sem versão, na raiz de `graph.instagram.com`. Não era permissão nem limite de testador — era a URL errada, e o mesmo bug rodava em silêncio todo dia no cron de renovação de token. Corrigido com `instagramGraphRoot()` separado do `instagramGraphBase()` versionado, travado com testes que fixam a URL exata de cada endpoint. Ver §5.9.1. |
+| 2026-09-23 | Explicado como conectar contas do Instagram que não são do próprio Facebook do usuário (o app já usa Instagram API with Instagram Login — nunca precisou de Facebook) e o que falta para um SaaS onde qualquer cliente conecta a própria conta sozinho: Revisão do App da Meta para Acesso Avançado. Escrito `docs/meta-app-review.md` com o checklist e o texto de justificativa por permissão. Confirmado que o painel de controle de acesso (Configurações → Time, papéis Dono/Administrador/Membro) já existe e cobre 'criar contas de acesso'; documentado que ele é por workspace inteiro, não isola cliente por cliente — isso fica para quando o SaaS tiver clientes pagantes reais. |
+| 2026-09-15 | Troca de perfil do Instagram (`@odiegoalves_` → `@appmaemind`). Duas falhas que só existem com mais de uma conta: o seletor de conta do construtor mandava `instagramAccountId` no PATCH e o schema descartava em silêncio (automação ficava presa na conta antiga), e "Desconectar" dizia que pausava quando na verdade apaga em cascata automações, registros e contatos. PATCH passa a mover de conta com validação de workspace e limpeza do post da conta antiga (`lib/automations/move-account.ts`); a confirmação de desconexão passa a dizer o que será apagado, com número. Ver §5.9. |
+| 2026-09-10 | Aviso por e-mail quando a conta do Instagram cai, mandado uma vez por incidente (a condicao do `updateMany` e o que garante isso). Best-effort: falhar ao avisar nao pode derrubar o worker, e sem chave configurada desiste em silencio. Ver §5.6. |
+| 2026-09-10 | Revisão de código do Envio ativo: oito defeitos de comportamento corrigidos — vazamento de cota na trava de token, disparo ignorando token morto, ordenação de urgência quebrada pelo `createMany`, POST repetido disparando duas vezes (agora `requestId` único), contagem dupla em job redistribuído, truncamento silencioso na tela, e duas incompatibilidades de hidratação. Ver §5.8. |
+| 2026-09-10 | Incidente de token morto em producao: estado `tokenInvalidAt` na conta, aviso fixo em toda tela com botao de reconectar, worker desistindo rapido, e `humanizeApiError` traduzindo o erro da Meta nas telas. Passada de UI: Automacoes sem poluicao (uma frase no lugar de seis selos, falha em vermelho), Registros com linha expansivel, numeros do Inicio clicaveis levando para a lista filtrada. Ver §5.6 e §5.7. |
+| 2026-09-09 | Envio ativo (janela de 24h): audiência rolante em vez de disparo para a base, porque o Instagram não tem One-Time Notification nem message tag de marketing. Origem do contato (`sourceAutomationId`) com backfill. Job por destinatário, espaçado, com a janela reconferida na hora do envio. Coluna "Chegou por" e estado da janela na tela de Contatos. Fallback `{username}` deixou de virar "there" (inglês) e passa a sumir junto com o espaço anterior. Ver §5.5. |
 | 2026-09-09 | Deploy autorizado sem backup. Migrations validadas contra um Postgres 16 real (do zero e simulando produção com dados), e a decisão de envio conferida com o código real contra esse banco. `gen_random_uuid()` trocado por `md5` e `ADD VALUE` tornado idempotente, porque uma migration que falha impede o app de subir. Motivos de bloqueio traduzidos para pt-BR (é a coluna Motivo da tela de Registros). Ver §10.1. |
 | 2026-09-09 | Funil enviado → lido → clicado: `DmLog.readAt` preenchido por varredura do watermark de leitura, `readRate` na API, funil na aba Números e "lidos" no cartão da automação. |
 | 2026-09-09 | Condição por tag: `Contact.tags` editáveis e filtráveis na tela de Contatos, e `Automation.requiredTags` / `excludedTags` como condição de envio (decidida antes da frequência e sem custo de query). Novo status `SKIPPED_TAG_RULE`. |

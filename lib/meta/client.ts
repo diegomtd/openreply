@@ -4,6 +4,21 @@ function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
 
+/**
+ * A pessoa não conseguia conectar conta nenhuma, nem reconectar uma que já
+ * tinha funcionado antes: `getLongLivedToken` e `refreshLongLivedToken`
+ * voltavam "Unsupported request - method type: get". Não é permissão nem
+ * limite de conta — é a URL errada. A troca por token de longa duração e a
+ * renovação vivem na **raiz** de `graph.instagram.com`, sem a versão da API
+ * no caminho — diferente de todo outro endpoint deste arquivo, que é sob
+ * `/{versão}/…`. `instagramGraphBase()` prefixava os dois com a versão, e a
+ * Meta não reconhece `/v25.0/access_token` como nada — daí a mensagem
+ * genérica em vez de um erro de permissão de verdade.
+ */
+function instagramGraphRoot() {
+  return "https://graph.instagram.com";
+}
+
 function facebookGraphBase() {
   return `https://graph.facebook.com/${getMetaGraphApiVersion()}`;
 }
@@ -707,7 +722,7 @@ export async function getFollowerCountSeries(
 export async function getLongLivedToken(
   shortLivedToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
-  const url = new URL(`${instagramGraphBase()}/access_token`);
+  const url = new URL(`${instagramGraphRoot()}/access_token`);
   url.searchParams.set("grant_type", "ig_exchange_token");
   url.searchParams.set("client_secret", requireEnv("INSTAGRAM_APP_SECRET"));
   url.searchParams.set("access_token", shortLivedToken);
@@ -724,7 +739,7 @@ export async function getLongLivedToken(
 export async function refreshLongLivedToken(
   longLivedToken: string
 ): Promise<{ accessToken: string; expiresIn: number }> {
-  const url = new URL(`${instagramGraphBase()}/refresh_access_token`);
+  const url = new URL(`${instagramGraphRoot()}/refresh_access_token`);
   url.searchParams.set("grant_type", "ig_refresh_token");
   url.searchParams.set("access_token", longLivedToken);
 
