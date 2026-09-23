@@ -109,7 +109,11 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    return NextResponse.redirect(`${baseUrl}/dashboard?connected=true`);
+    // Volta para Configurações, não para o Início: é onde a lista de contas
+    // conectadas vive, e onde a pessoa vai olhar pra conferir que funcionou.
+    // O Início nunca recebeu esse parâmetro — a conexão acontecia de verdade
+    // e a tela só voltava sem dizer nada, parecendo que não tinha feito nada.
+    return NextResponse.redirect(`${baseUrl}/settings?instagram=connected`);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[Instagram Callback] Error:", err);
