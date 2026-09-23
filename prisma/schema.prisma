@@ -15,6 +15,10 @@ model User {
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  /// Hash scrypt (salt:hash em hex), para quem entra com e-mail e senha em vez
+  /// do link mágico. Nulo é o normal: a maioria só usa o link por e-mail. Nunca
+  /// grave a senha em texto puro aqui nem em lugar nenhum.
+  passwordHash  String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

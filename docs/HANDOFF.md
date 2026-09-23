@@ -438,6 +438,78 @@ pegam, porque são de comportamento. Todos corrigidos:
 delay `NaN` faria a fila inteira sair de uma vez — o oposto do que o espaçamento
 existe para evitar.
 
+## 5.9.2 Login com e-mail e senha (2026-09-23)
+
+Até aqui o único jeito de entrar era o link mágico por e-mail (Resend). Isso
+trava dois casos reais: entregar acesso a alguém sem esperar e-mail nenhum
+chegar (WhatsApp, em mão), e simplesmente preferir senha. Adicionado como
+**segunda opção**, nunca substituindo o link mágico.
+
+### Por que trocou a estratégia de sessão
+
+O Credentials provider do Auth.js só funciona com sessão em **JWT** — é uma
+restrição do próprio Auth.js, documentada como erro fixo
+(`errors.authjs.dev#unsupportedstrategy`), não uma escolha de projeto. A
+sessão em banco (`strategy: "database"`) virou `strategy: "jwt"` para o app
+inteiro. O adapter (`PrismaAdapter`) continua no lugar e continua sendo
+usado pelo link mágico do mesmo jeito — grava `User`/`Account`/
+`VerificationToken` normalmente; só a sessão em si passou de uma linha na
+tabela `Session` para um cookie assinado.
+
+**Isto não muda quem pode fazer o quê.** Toda checagem de permissão deste
+app já relê o cargo do banco a cada requisição
+(`getCurrentWorkspaceContext` → `prisma.workspaceMember.findFirst`) — nunca
+confiou em nada dentro da sessão além do id do usuário. Remover o membro do
+workspace continua cortando o acesso na próxima requisição, sessão JWT ou
+não.
+
+### Senha: scrypt do próprio `node:crypto`, sem dependência nova
+
+`lib/auth/password.ts` — mesmo princípio de `lib/meta/oauth.ts` (cifra o
+token do Instagram sem puxar biblioteca externa). `scrypt` é lento de
+propósito: é a defesa contra força bruta se o banco vazar algum dia.
+
+- `hashPassword` / `verifyPassword`: salt aleatório de 16 bytes por senha,
+  `timingSafeEqual` na comparação.
+- **`verifyPassword` roda o scrypt mesmo quando não existe hash nenhum**
+  (e-mail que não existe, ou existe mas só usa o link mágico) — contra um
+  salt fixo, só para gastar o mesmo tempo. Sem isso, o tempo de resposta
+  já entregaria se aquele e-mail tem senha cadastrada, sem precisar acertar
+  senha nenhuma.
+- **Limite de tentativas** (`lib/auth/login-rate-limit.ts`): 8 tentativas
+  erradas por e-mail em 15 minutos, Redis simples (`INCR` + `EXPIRE`) — não
+  precisa ser atômico feito a cota de DM
+  (`lib/utils/rate-limiter.ts`); perder uma corrida rara aqui deixa passar
+  UMA tentativa a mais, não uma cota de negócio.
+- O login por senha nunca teve essa superfície de ataque antes — o link
+  mágico é um token de uso único, não dá pra "adivinhar".
+
+### Dois jeitos de ganhar uma senha
+
+1. **Trocar a própria** (Configurações → Sua senha, qualquer pessoa
+   logada): quem só tinha o link mágico ganha senha também; quem já tem
+   senha precisa confirmar a atual antes de trocar — quem nunca teve, não
+   precisa confirmar nada, porque chegar autenticado já provou dono do
+   e-mail.
+2. **Acesso direto** (Configurações → Time → Acesso direto, só
+   dono/administrador): cria e-mail + senha temporária na hora — a senha
+   aparece **uma vez só** na tela, para copiar e entregar por fora do
+   e-mail. Chamar de novo para o mesmo e-mail reseta a senha dele, de
+   propósito (serve tanto para criar quanto para resetar).
+
+### O que NÃO mudou
+
+- O link mágico continua sendo o caminho de recuperação: esqueceu a senha,
+  entra pelo link (mesmo e-mail já prova dono da conta) e troca em
+  Configurações. Não existe fluxo de "esqueci a senha" separado, de
+  propósito — reaproveita o que já existe em vez de duplicar.
+- `events.createUser` (que cria o workspace automático) só dispara para
+  contas criadas pelo adapter (link mágico, OAuth) — uma conta de acesso
+  direto já nasce com workspace explícito (o do administrador que criou),
+  então não passa por ali.
+
+---
+
 ## 5.9.1 "Unsupported request - method type: get" ao conectar (2026-09-23)
 
 Depois de §5.9, a pessoa não conseguia conectar **nenhuma** conta nova — nem
@@ -749,6 +821,8 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 | P3 | Integrações (Sheets, webhook de saída) | Depende de demanda |
 | P1 | Revisão do app na Meta (App Review) para Acesso Avançado — necessário para qualquer estranho conectar a própria conta sem ser cadastrado como testador | Checklist e texto de submissão prontos em `docs/meta-app-review.md`. O código já atende os pré-requisitos (`/privacy`, `/terms`, `/data-deletion`); falta o lado Meta (verificação de negócio, gravações, revisão). |
 | P2 | Workspace por cliente (multi-tenant de verdade) — hoje quem é convidado para um workspace vê todas as contas dele, sem isolar cliente por cliente | Só faz sentido quando o SaaS tiver clientes pagantes de fato. Ver nota final de `docs/meta-app-review.md`. |
+| P2 | Marca como configuração (nome, cor, logo) em vez de espalhada pelo código — pré-requisito para revender white-label sem editar código a cada cliente | Ver `docs/whitelabel-saas-gaps.md`, seção White-label. |
+| P3 | Cobrança por uso (planos, Stripe, teto por plano em cima de `dmsSentThisPeriod`) | Só faz sentido junto com o isolamento por cliente — sem isolamento, cobrar por workspace cobraria do time errado. |
 
 ---
 
@@ -756,6 +830,7 @@ DATABASE_URL="postgresql://postgres@localhost:55432/<db>?host=/tmp" npx prisma m
 
 | Data | O que foi feito |
 |---|---|
+| 2026-09-23 | Login com e-mail e senha, como segunda opção ao lado do link mágico: `lib/auth/password.ts` (scrypt do node:crypto, sem dependência nova), limite de tentativas em Redis, sessão trocada para JWT (exigência do Credentials provider do Auth.js, não muda quem pode fazer o quê — cada checagem já relê o cargo do banco). Duas telas novas em Configurações: trocar a própria senha, e criar acesso direto (e-mail + senha na hora, sem e-mail nenhum, só dono/administrador). Ver §5.9.2. Também escrito `docs/whitelabel-saas-gaps.md` — o que já está pronto para vender como white-label ou SaaS, o que falta em cada caminho, e as oportunidades que não são óbvias (a métrica de uso já existe, só falta o preço em cima; o e-mail de conta caída é retenção sem querer). |
 | 2026-09-23 | Corrigido "Unsupported request - method type: get" ao conectar/reconectar qualquer conta do Instagram: `getLongLivedToken` e `refreshLongLivedToken` prefixavam a versão da API numa URL que a Meta serve sem versão, na raiz de `graph.instagram.com`. Não era permissão nem limite de testador — era a URL errada, e o mesmo bug rodava em silêncio todo dia no cron de renovação de token. Corrigido com `instagramGraphRoot()` separado do `instagramGraphBase()` versionado, travado com testes que fixam a URL exata de cada endpoint. Ver §5.9.1. |
 | 2026-09-23 | Explicado como conectar contas do Instagram que não são do próprio Facebook do usuário (o app já usa Instagram API with Instagram Login — nunca precisou de Facebook) e o que falta para um SaaS onde qualquer cliente conecta a própria conta sozinho: Revisão do App da Meta para Acesso Avançado. Escrito `docs/meta-app-review.md` com o checklist e o texto de justificativa por permissão. Confirmado que o painel de controle de acesso (Configurações → Time, papéis Dono/Administrador/Membro) já existe e cobre 'criar contas de acesso'; documentado que ele é por workspace inteiro, não isola cliente por cliente — isso fica para quando o SaaS tiver clientes pagantes reais. |
 | 2026-09-15 | Troca de perfil do Instagram (`@odiegoalves_` → `@appmaemind`). Duas falhas que só existem com mais de uma conta: o seletor de conta do construtor mandava `instagramAccountId` no PATCH e o schema descartava em silêncio (automação ficava presa na conta antiga), e "Desconectar" dizia que pausava quando na verdade apaga em cascata automações, registros e contatos. PATCH passa a mover de conta com validação de workspace e limpeza do post da conta antiga (`lib/automations/move-account.ts`); a confirmação de desconexão passa a dizer o que será apagado, com número. Ver §5.9. |

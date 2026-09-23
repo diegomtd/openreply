@@ -22,6 +22,11 @@ Conferido em 2026-09-23, sem precisar mudar nada:
   própria tela (Configurações → Desconectar) e pedir apagamento total por
   e-mail. É uma **Data Deletion Instructions URL** (a Meta aceita isso no
   lugar de um callback automático — não precisa construir endpoint).
+- **`/meta-review`** — já existe, feita para o revisor ler: fluxo de uso,
+  posição de compliance ("nunca pede senha do Instagram, nunca faz
+  scraping"), e um roteiro de teste. Vale conferir se ainda bate com o
+  produto atual antes de submeter — foi escrita antes do Envio ativo e do
+  login por senha.
 - **Nunca pede senha do Instagram**, nunca faz scraping — só a API oficial.
   Token cifrado em repouso (`lib/meta/oauth.ts`).
 

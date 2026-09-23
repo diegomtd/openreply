@@ -65,6 +65,18 @@ export default function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"ADMIN" | "MEMBER">("MEMBER");
   const [memberError, setMemberError] = useState<string | null>(null);
+  const [directEmail, setDirectEmail] = useState("");
+  const [directName, setDirectName] = useState("");
+  const [directRole, setDirectRole] = useState<"ADMIN" | "MEMBER">("MEMBER");
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [directResult, setDirectResult] = useState<{
+    email: string;
+    temporaryPassword: string;
+  } | null>(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSaved, setPasswordSaved] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -196,6 +208,56 @@ export default function SettingsPage() {
     });
     await refreshMembers();
     setBusy(null);
+  }
+
+  async function createDirectAccess(event: React.FormEvent) {
+    event.preventDefault();
+    setDirectError(null);
+    setDirectResult(null);
+    setBusy("direct-access");
+    const res = await fetch("/api/workspace/members/direct-access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: directEmail,
+        name: directName || undefined,
+        role: directRole,
+      }),
+    });
+    const payload = await res.json();
+    setBusy(null);
+    if (!payload.success) {
+      setDirectError(payload.error ?? "Não foi possível criar o acesso");
+      return;
+    }
+    // A senha só existe nesta resposta — não fica guardada em lugar nenhum
+    // que dê pra ver de novo depois. Fica na tela até a pessoa trocar de
+    // aba ou recarregar, de propósito, para dar tempo de copiar.
+    setDirectResult(payload.data);
+    setDirectEmail("");
+    setDirectName("");
+    await refreshMembers();
+  }
+
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    setPasswordError(null);
+    setPasswordSaved(false);
+    setBusy("password");
+    const res = await fetch("/api/account/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const payload = await res.json();
+    setBusy(null);
+    if (!payload.success) {
+      setPasswordError(payload.error ?? "Não foi possível trocar a senha");
+      return;
+    }
+    setCurrentPassword("");
+    setNewPassword("");
+    setPasswordSaved(true);
   }
 
   if (loading) {
@@ -405,6 +467,145 @@ export default function SettingsPage() {
             )}
           </form>
         )}
+
+        {canManageMembers && (
+          <div className="mt-6 border-t border-border pt-4">
+            <p className="text-sm font-medium text-foreground">Acesso direto</p>
+            <p className="mt-1 text-xs text-muted">
+              Cria e-mail e senha na hora, sem depender de ninguém receber
+              e-mail nenhum — a senha aparece uma vez aqui, e você entrega por
+              onde quiser (WhatsApp, em mão). Repetir para o mesmo e-mail troca
+              a senha dele.
+            </p>
+
+            <form
+              onSubmit={createDirectAccess}
+              className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_140px_auto]"
+            >
+              <input
+                type="email"
+                value={directEmail}
+                onChange={(event) => setDirectEmail(event.target.value)}
+                placeholder="pessoa@email.com"
+                className="rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
+                required
+              />
+              <input
+                type="text"
+                value={directName}
+                onChange={(event) => setDirectName(event.target.value)}
+                placeholder="Nome (opcional)"
+                className="rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
+              />
+              <select
+                value={directRole}
+                onChange={(event) =>
+                  setDirectRole(event.target.value as "ADMIN" | "MEMBER")
+                }
+                className="rounded border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
+              >
+                <option value="MEMBER">Membro</option>
+                <option value="ADMIN">Administrador</option>
+              </select>
+              <button
+                type="submit"
+                disabled={busy === "direct-access"}
+                className="rounded border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:border-border-hover disabled:opacity-50"
+              >
+                {busy === "direct-access" ? "Criando…" : "Criar acesso"}
+              </button>
+              {directError && (
+                <p className="sm:col-span-4 text-sm text-error">{directError}</p>
+              )}
+            </form>
+
+            {directResult && (
+              <div className="mt-4 rounded border border-accent/30 bg-accent/10 p-4">
+                <p className="text-sm font-semibold text-foreground">
+                  Acesso criado para {directResult.email}
+                </p>
+                <p className="mt-2 text-xs text-muted">
+                  Senha temporária — copie agora, ela não aparece de novo.
+                  Peça para a pessoa trocar assim que entrar, em Configurações
+                  → Sua senha.
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="rounded bg-surface px-3 py-1.5 text-sm text-foreground">
+                    {directResult.temporaryPassword}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void navigator.clipboard?.writeText(
+                        directResult.temporaryPassword
+                      )
+                    }
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
+                  >
+                    Copiar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="panel rounded p-4 sm:p-6">
+        <h2 className="text-base font-semibold mb-2">Sua senha</h2>
+        <p className="mb-6 text-xs text-muted">
+          Opcional — sem senha cadastrada, o login continua pelo link por
+          e-mail normalmente.
+        </p>
+
+        <form onSubmit={changePassword} className="max-w-sm space-y-4">
+          <div>
+            <label
+              htmlFor="currentPassword"
+              className="text-sm font-medium text-foreground"
+            >
+              Senha atual
+            </label>
+            <input
+              id="currentPassword"
+              type="password"
+              value={currentPassword}
+              onChange={(event) => setCurrentPassword(event.target.value)}
+              placeholder="Deixe em branco se ainda não tem senha"
+              autoComplete="current-password"
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="newPassword"
+              className="text-sm font-medium text-foreground"
+            >
+              Nova senha
+            </label>
+            <input
+              id="newPassword"
+              type="password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="Pelo menos 8 caracteres"
+              autoComplete="new-password"
+              required
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={busy === "password"}
+            className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+          >
+            {busy === "password" ? "Salvando…" : "Salvar senha"}
+          </button>
+          {passwordError && <p className="text-sm text-error">{passwordError}</p>}
+          {passwordSaved && (
+            <p className="text-sm text-success">Senha salva.</p>
+          )}
+        </form>
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
