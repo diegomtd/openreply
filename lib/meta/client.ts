@@ -431,6 +431,27 @@ export async function sendCommentReply(
   return handleResponse(response);
 }
 
+/**
+ * Hide or unhide a comment on the account's own media. Hidden comments stay
+ * visible to their author only — the reversible way to clean up spam.
+ */
+export async function setCommentHidden(
+  accessToken: string,
+  commentId: string,
+  hidden: boolean
+): Promise<{ success: boolean }> {
+  const response = await fetch(`${instagramGraphBase()}/${commentId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ hide: hidden }),
+  });
+
+  return handleResponse(response);
+}
+
 export async function getMediaComments(
   accessToken: string,
   mediaId: string

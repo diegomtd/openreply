@@ -90,6 +90,13 @@ multi-tenant.
 | `app/api/dashboard/stats/route.ts` | Números do Home. Reescrito para 1 query da semana + `count()` de contatos. |
 | `app/api/logs/route.ts` | Logs paginados, filtráveis pelos novos status de skip |
 
+### API de agentes (`/api/agent/v1/*`)
+
+Chave única `OPENREPLY_AGENT_TOKEN` (desligada sem ela). Usada pelo Netuno
+(ecossistema Oceano Azul) para ler contas, posts, comentários e DMs e
+responder. Bloqueia DM fora da janela de 24h e para quem deu opt-out. Contrato
+em `docs/agent-api.md`, roteador em `lib/agent/router.ts`.
+
 ### Cron endpoints (`app/api/cron/*`, protegidos por `CRON_SECRET`)
 
 `refresh-tokens` (05h) · `attach-next-reel` (06h) · `snapshot-followers` (07h) ·
