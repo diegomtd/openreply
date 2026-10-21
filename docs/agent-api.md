@@ -19,7 +19,7 @@ Toda chamada leva `Authorization: Bearer <chave>`. A chave dá leitura de DMs e 
 | GET | `/api/agent/v1/accounts` | contas conectadas e saúde do token |
 | GET | `/api/agent/v1/accounts/:conta/insights?days=30` | seguidores, variação diária e snapshots |
 | GET | `/api/agent/v1/accounts/:conta/media?limit=25&insights=1` | posts com views, alcance, salvos, envios |
-| GET | `/api/agent/v1/accounts/:conta/comments?hours=72&posts=10&unanswered=1` | comentários recentes, com `answered` |
+| GET | `/api/agent/v1/accounts/:conta/comments?hours=72&posts=10&unanswered=1` | comentários recentes, com `answered` e `automation` (automação ativa que pega o comentário e o status do envio, ou `null`) |
 | POST | `/api/agent/v1/accounts/:conta/comments/:id/reply` `{message}` | resposta pública |
 | POST | `/api/agent/v1/accounts/:conta/comments/:id/private-reply` `{message}` | resposta privada ao autor do comentário |
 | POST | `/api/agent/v1/accounts/:conta/comments/:id/hide` `{hidden?}` | oculta (ou desoculta) |

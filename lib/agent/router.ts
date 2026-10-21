@@ -20,6 +20,7 @@ import {
   type InstagramMedia,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
+import { matchKeywords } from "@/lib/utils/keyword-matcher";
 
 /**
  * Roteador da API de agentes. Fica fora do `route.ts` para ser testável sem
@@ -168,22 +169,57 @@ async function listRecentComments(account: InstagramAccount, token: string, quer
     getRecentMediaComments(token, m.id, sinceMs, 200)
   );
 
-  const comments = media.flatMap((m, i) =>
+  // Comentário que bate com uma automação ativa é dela: o agente não responde
+  // por cima, a não ser que ela tenha falhado (status FAILED).
+  const automations = await prisma.automation.findMany({
+    where: { instagramAccountId: account.id, isActive: true },
+    select: { id: true, name: true, postId: true, matchAnyPost: true, keywords: true, matchAnyWord: true, wholeWordMatch: true },
+  });
+  const automationFor = (mediaId: string, text: string) => {
+    for (const a of automations) {
+      if (!a.matchAnyPost && a.postId !== mediaId) continue;
+      if (a.matchAnyWord) return { automation: a, keyword: null };
+      const hit = matchKeywords(text ?? "", a.keywords, a.wholeWordMatch);
+      if (hit.matched) return { automation: a, keyword: hit.matchedKeyword };
+    }
+    return null;
+  };
+
+  const raw = media.flatMap((m, i) =>
     perMedia[i]
       // O próprio dono comentando não é conversa para responder.
       .filter((c) => c.from?.id !== account.instagramId)
-      .map((c) => ({
-        id: c.id,
-        mediaId: m.id,
-        permalink: m.permalink ?? null,
-        text: c.text,
-        from: c.from ?? null,
-        timestamp: c.timestamp,
-        answered: (c.replies?.data ?? []).some(
-          (r) => r.from?.id === account.instagramId
-        ),
-      }))
+      .map((c) => ({ m, c, match: automationFor(m.id, c.text) }))
   );
+  const matchedIds = raw.filter((r) => r.match).map((r) => r.c.id);
+  const logs = matchedIds.length
+    ? await prisma.dmLog.findMany({
+        where: { instagramAccountId: account.id, commentId: { in: matchedIds } },
+        select: { commentId: true, automationId: true, status: true },
+      })
+    : [];
+  const statusOf = (commentId: string, automationId: string) =>
+    logs.find((l) => l.commentId === commentId && l.automationId === automationId)?.status ?? "PENDING";
+
+  const comments = raw.map(({ m, c, match }) => ({
+    id: c.id,
+    mediaId: m.id,
+    permalink: m.permalink ?? null,
+    text: c.text,
+    from: c.from ?? null,
+    timestamp: c.timestamp,
+    answered: (c.replies?.data ?? []).some(
+      (r) => r.from?.id === account.instagramId
+    ),
+    automation: match
+      ? {
+          id: match.automation.id,
+          name: match.automation.name,
+          keyword: match.keyword,
+          status: statusOf(c.id, match.automation.id),
+        }
+      : null,
+  }));
 
   return ok({
     account: account.username,
