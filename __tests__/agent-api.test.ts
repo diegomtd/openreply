@@ -9,6 +9,7 @@ const { mockPrisma, meta } = vi.hoisted(() => ({
     instagramAccount: { findMany: vi.fn(), findFirst: vi.fn() },
     contact: { findUnique: vi.fn(), findMany: vi.fn() },
     dmLog: { findMany: vi.fn() },
+    automation: { findMany: vi.fn() },
     followerSnapshot: { findMany: vi.fn() },
   },
   meta: {
@@ -67,6 +68,8 @@ function req(method: string, path: string, body?: unknown, query = "") {
 beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.instagramAccount.findFirst.mockResolvedValue(account);
+  mockPrisma.automation.findMany.mockResolvedValue([]);
+  mockPrisma.dmLog.findMany.mockResolvedValue([]);
 });
 
 describe("checkAgentAuth", () => {
@@ -163,6 +166,27 @@ describe("comentários", () => {
     const res = await req("GET", "accounts/acc1/comments", undefined, "unanswered=1");
     const body = res.body as { comments: { id: string }[] };
     expect(body.comments.map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("marca o comentário que é de uma automação ativa e o status dela", async () => {
+    meta.getAllUserMedia.mockResolvedValue([
+      { id: "m1", comments_count: 3, timestamp: "2026-10-17T00:00:00Z", media_type: "VIDEO" },
+    ]);
+    meta.getRecentMediaComments.mockResolvedValue([
+      { id: "c1", text: "FIRMA!", from: { id: "u1" }, timestamp: "2026-10-17T10:00:00Z" },
+      { id: "c2", text: "vou confirmar depois", from: { id: "u2" }, timestamp: "2026-10-17T09:00:00Z" },
+      { id: "c3", text: "firma hq", from: { id: "u3" }, timestamp: "2026-10-17T08:00:00Z" },
+    ]);
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { id: "a1", name: "FIRMA", postId: null, matchAnyPost: true, keywords: ["firma", "firmahq"], matchAnyWord: false, wholeWordMatch: true },
+    ]);
+    mockPrisma.dmLog.findMany.mockResolvedValue([{ commentId: "c3", automationId: "a1", status: "FAILED" }]);
+    const res = await req("GET", "accounts/acc1/comments");
+    const body = res.body as { comments: { id: string; automation: { status: string; keyword: string | null } | null }[] };
+    const porId = Object.fromEntries(body.comments.map((c) => [c.id, c.automation]));
+    expect(porId.c1).toMatchObject({ keyword: "firma", status: "PENDING" });
+    expect(porId.c2).toBeNull();
+    expect(porId.c3).toMatchObject({ status: "FAILED" });
   });
 });
 
