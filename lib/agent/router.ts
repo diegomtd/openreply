@@ -22,6 +22,7 @@ import {
   type InstagramMedia,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
+import { createAutomation, listAutomations, setAutomationActive } from "@/lib/agent/automations";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 
 /**
@@ -489,6 +490,15 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
 
     if (method === "GET" && resource === "contacts" && !id) {
       return await listContacts(account, query);
+    }
+    // Automações não chamam a Meta: não precisam do token decifrado.
+    if (resource === "automations") {
+      if (method === "GET" && !id) return await listAutomations(account);
+      if (method === "POST" && !id) return await createAutomation(account, body);
+      if (method === "POST" && id && (action === "pause" || action === "activate")) {
+        return await setAutomationActive(account, decodeURIComponent(id), action === "activate");
+      }
+      return fail(404, "Not found.");
     }
 
     const token = decryptToken(account.accessToken);
