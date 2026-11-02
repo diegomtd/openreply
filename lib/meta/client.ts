@@ -801,3 +801,97 @@ export async function debugToken(inputToken: string, accessToken: string) {
   const response = await fetch(url.toString());
   return handleResponse(response);
 }
+
+// ---------------------------------------------------------------------------
+// Business discovery: números públicos de OUTRA conta profissional (radar de
+// referências do Netuno). Só lê; não existe escrita em conta alheia.
+//
+// A Meta documenta o endpoint para tokens de Facebook Login / Unified Login
+// (graph.facebook.com). Com o token de Instagram Login das contas daqui pode
+// não estar liberado, então tentamos primeiro graph.instagram.com com o token
+// da conta e, se a Meta negar, caímos para graph.facebook.com quando houver
+// META_DISCOVERY_TOKEN + META_DISCOVERY_IG_USER_ID no ambiente.
+// ---------------------------------------------------------------------------
+
+export interface DiscoveredMedia {
+  id: string;
+  caption?: string;
+  media_type?: string;
+  media_product_type?: string;
+  permalink?: string;
+  timestamp: string;
+  like_count?: number;
+  comments_count?: number;
+  view_count?: number;
+}
+
+export interface DiscoveredProfile {
+  id: string;
+  username: string;
+  name?: string;
+  biography?: string;
+  followers_count?: number;
+  media_count?: number;
+  media: DiscoveredMedia[];
+  via: "instagram" | "facebook";
+}
+
+const DISCOVERY_MEDIA_FIELDS =
+  "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,view_count";
+
+export function isInstagramHandle(handle: string) {
+  return /^[A-Za-z0-9._]{1,30}$/.test(handle.replace(/^@/, ""));
+}
+
+export function businessDiscoveryFields(username: string, mediaLimit: number) {
+  const handle = username.replace(/^@/, "").trim();
+  if (!isInstagramHandle(handle)) throw new Error(`Invalid Instagram username: ${username}`);
+  return `business_discovery.username(${handle}){id,username,name,biography,followers_count,media_count,media.limit(${mediaLimit}){${DISCOVERY_MEDIA_FIELDS}}}`;
+}
+
+async function discoveryCall(
+  base: string,
+  igUserId: string,
+  token: string,
+  fields: string
+) {
+  const url = new URL(`${base}/${igUserId}`);
+  url.searchParams.set("fields", fields);
+  url.searchParams.set("access_token", token);
+  const data = await handleResponse<{
+    business_discovery?: Omit<DiscoveredProfile, "media" | "via"> & {
+      media?: { data: DiscoveredMedia[] };
+    };
+  }>(await fetch(url.toString()));
+  if (!data.business_discovery) {
+    throw new MetaApiError(404, undefined, undefined, "Profile not found or not a professional account.");
+  }
+  return data.business_discovery;
+}
+
+export async function getBusinessDiscovery(
+  accessToken: string,
+  igUserId: string,
+  username: string,
+  mediaLimit = 25
+): Promise<DiscoveredProfile> {
+  const fields = businessDiscoveryFields(username, Math.min(Math.max(mediaLimit, 1), 50));
+  const fbToken = process.env.META_DISCOVERY_TOKEN;
+  const fbIgUser = process.env.META_DISCOVERY_IG_USER_ID;
+
+  let raw;
+  let via: DiscoveredProfile["via"] = "instagram";
+  try {
+    raw = await discoveryCall(instagramGraphBase(), igUserId, accessToken, fields);
+  } catch (err) {
+    // Só tenta o outro caminho quando a Meta negou o endpoint, não em perfil
+    // inexistente, limite ou token vencido.
+    const denied = err instanceof PermissionError || (err instanceof MetaApiError && err.code === 3);
+    if (!denied || !fbToken || !fbIgUser) throw err;
+    raw = await discoveryCall(facebookGraphBase(), fbIgUser, fbToken, fields);
+    via = "facebook";
+  }
+
+  const { media, ...profile } = raw;
+  return { ...profile, media: media?.data ?? [], via };
+}

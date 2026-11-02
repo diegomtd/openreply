@@ -28,6 +28,11 @@ Toda chamada leva `Authorization: Bearer <chave>`. A chave dá leitura de DMs e 
 | POST | `/api/agent/v1/accounts/:conta/messages` `{recipientId, text}` | DM dentro da janela de 24h |
 | GET | `/api/agent/v1/accounts/:conta/contacts?since=ISO` | contatos, tags e opt-out |
 | GET | `/api/agent/v1/logs?since=ISO` | envios e skips das automações |
+| GET | `/api/agent/v1/accounts/:conta/discovery/:perfil?limit=25` | radar: seguidores e últimos posts (curtidas, comentários, views) de outro perfil profissional, com `engagementRate` e `viewsPerFollower` |
+
+### Radar (business discovery)
+
+Só leitura de perfil comercial ou de criador; perfil pessoal ou com restrição de idade volta 502. Tenta primeiro com o token da `:conta` (Instagram Login). Se a Meta negar (403 aqui), configure o caminho do Facebook Login e reinicie: `META_DISCOVERY_TOKEN` (token de usuário do Facebook com `instagram_basic`, `pages_show_list` e `business_management`, de quem é admin do app) e `META_DISCOVERY_IG_USER_ID` (id da conta profissional ligada a uma Página). Conta no limite de chamadas da Meta; o Netuno chama poucas vezes por dia.
 
 ## Regras garantidas pela API
 

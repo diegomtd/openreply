@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db/client";
 import { windowState } from "@/lib/broadcast/window";
 import {
   getAllUserMedia,
+  getBusinessDiscovery,
+  isInstagramHandle,
   getConversationMessages,
   getConversations,
   getFollowerCountSeries,
@@ -382,6 +384,49 @@ async function accountInsights(account: InstagramAccount, token: string, query: 
   });
 }
 
+/**
+ * Radar: números públicos de um perfil profissional de referência (só leitura).
+ * `engagementRate` = (curtidas + comentários) ÷ seguidores; `viewsPerFollower`
+ * = views ÷ seguidores, a régua do agente juiz para achar o que furou a bolha.
+ */
+async function discoverProfile(
+  account: InstagramAccount,
+  token: string,
+  username: string,
+  query: URLSearchParams
+) {
+  if (!isInstagramHandle(username)) return fail(400, `Invalid Instagram username: ${username}`);
+  const profile = await getBusinessDiscovery(
+    token,
+    account.instagramId,
+    username,
+    intParam(query, "limit", 25, 50)
+  );
+  const followers = profile.followers_count ?? 0;
+  const ratio = (n: number | undefined) =>
+    followers > 0 && n !== undefined ? Math.round((n / followers) * 10_000) / 10_000 : null;
+  return ok({
+    username: profile.username,
+    name: profile.name ?? null,
+    biography: profile.biography ?? null,
+    followers: profile.followers_count ?? null,
+    mediaCount: profile.media_count ?? null,
+    via: profile.via,
+    media: profile.media.map((m) => ({
+      id: m.id,
+      caption: m.caption ?? null,
+      type: m.media_product_type ?? m.media_type ?? null,
+      permalink: m.permalink ?? null,
+      timestamp: m.timestamp,
+      likes: m.like_count ?? null,
+      comments: m.comments_count ?? null,
+      views: m.view_count ?? null,
+      engagementRate: ratio((m.like_count ?? 0) + (m.comments_count ?? 0)),
+      viewsPerFollower: ratio(m.view_count),
+    })),
+  });
+}
+
 async function listLogs(query: URLSearchParams) {
   const since = query.get("since");
   const sinceDate = since ? new Date(since) : null;
@@ -454,6 +499,9 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
       if (resource === "conversations" && !id) return await listConversations(account, token);
       if (resource === "conversations" && id) return await getThread(account, token, id);
       if (resource === "insights" && !id) return await accountInsights(account, token, query);
+      if (resource === "discovery" && id) {
+        return await discoverProfile(account, token, decodeURIComponent(id), query);
+      }
     }
 
     if (method === "POST") {
@@ -466,6 +514,7 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
     return fail(404, "Not found.");
   } catch (err) {
     if (err instanceof TokenExpiredError) return fail(409, `Instagram token expired: ${err.message}`);
+    if (err instanceof PermissionError) return fail(403, `Meta denied: ${err.message}`);
     if (err instanceof MetaApiError) return fail(502, `Meta API error ${err.code}: ${err.message}`);
     console.error("[agent-api]", err);
     return fail(500, "Internal error.");
