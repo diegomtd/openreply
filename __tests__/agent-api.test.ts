@@ -19,6 +19,7 @@ const { mockPrisma, meta } = vi.hoisted(() => ({
     setCommentHidden: vi.fn(),
     getAllUserMedia: vi.fn(),
     getRecentMediaComments: vi.fn(),
+    getBusinessDiscovery: vi.fn(),
   },
 }));
 
@@ -39,6 +40,7 @@ vi.mock("@/lib/meta/client", () => {
     getFollowerCountSeries: vi.fn(),
     getMediaInsights: vi.fn(),
     getUserInfo: vi.fn(),
+    isInstagramHandle: (h: string) => /^[A-Za-z0-9._]{1,30}$/.test(h.replace(/^@/, "")),
     ...meta,
   };
 });
@@ -205,5 +207,32 @@ describe("contas", () => {
     mockPrisma.instagramAccount.findFirst.mockResolvedValue(null);
     expect((await req("GET", "accounts/nada/media")).status).toBe(404);
     expect((await req("GET", "qualquer")).status).toBe(404);
+  });
+});
+
+describe("radar (business discovery)", () => {
+  it("devolve números do perfil de referência com as réguas do juiz", async () => {
+    meta.getBusinessDiscovery.mockResolvedValue({
+      id: "x",
+      username: "ref",
+      followers_count: 1000,
+      media_count: 2,
+      via: "instagram",
+      media: [
+        { id: "m1", timestamp: "2026-11-01T00:00:00Z", like_count: 90, comments_count: 10, view_count: 50000, media_product_type: "REELS" },
+      ],
+    });
+    const res = await req("GET", "accounts/acc1/discovery/@ref", undefined, "limit=10");
+    expect(res.status).toBe(200);
+    expect(meta.getBusinessDiscovery).toHaveBeenCalledWith("token", "ig-owner", "@ref", 10);
+    const body = res.body as { followers: number; media: { engagementRate: number; viewsPerFollower: number; type: string }[] };
+    expect(body.followers).toBe(1000);
+    expect(body.media[0]).toMatchObject({ type: "REELS", engagementRate: 0.1, viewsPerFollower: 50 });
+  });
+
+  it("recusa @ inválido sem chamar a Meta", async () => {
+    const res = await req("GET", "accounts/acc1/discovery/" + encodeURIComponent("a b{x}"));
+    expect(res.status).toBe(400);
+    expect(meta.getBusinessDiscovery).not.toHaveBeenCalled();
   });
 });

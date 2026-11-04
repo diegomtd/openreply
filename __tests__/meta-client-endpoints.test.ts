@@ -73,3 +73,12 @@ describe("os outros endpoints continuam versionados", () => {
     expect(calledUrl.pathname).toMatch(/^\/v\d+(\.\d+)?\/me$/);
   });
 });
+
+describe("business discovery", () => {
+  it("monta o campo com o @ limpo e recusa @ com caractere estranho", async () => {
+    const { businessDiscoveryFields } = await import("@/lib/meta/client");
+    expect(businessDiscoveryFields("@foo.bar", 5)).toContain("business_discovery.username(foo.bar)");
+    expect(businessDiscoveryFields("foo", 5)).toContain("media.limit(5)");
+    expect(() => businessDiscoveryFields("a){x}", 5)).toThrow();
+  });
+});
