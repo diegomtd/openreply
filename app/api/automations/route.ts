@@ -45,11 +45,18 @@ const createAutomationSchema = z
         z.object({
           message: z.string().min(1).max(1000),
           delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+          // Lembrete só para quem não clicou, pergunta só para quem clicou.
+          condition: z
+            .enum(["ALWAYS", "NOT_CLICKED", "CLICKED"])
+            .optional()
+            .default("ALWAYS"),
         })
       )
       .max(3)
       .optional()
       .default([]),
+    // O robô sai da conversa quando a pessoa responde no meio da sequência.
+    stopOnReply: z.boolean().optional().default(false),
     publicReplyEnabled: z.boolean().optional().default(false),
     publicReplyMessage: z.string().max(1000).optional().nullable(),
     publicReplyMessages: z
@@ -155,10 +162,15 @@ const updateAutomationSchema = z.object({
       z.object({
         message: z.string().min(1).max(1000),
         delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+        condition: z
+          .enum(["ALWAYS", "NOT_CLICKED", "CLICKED"])
+          .optional()
+          .default("ALWAYS"),
       })
     )
     .max(3)
     .optional(),
+  stopOnReply: z.boolean().optional(),
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
@@ -482,6 +494,7 @@ export async function POST(request: NextRequest) {
     .map((step) => ({
       message: step.message.trim(),
       delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+      condition: step.condition ?? "ALWAYS",
     }))
     .filter((step) => step.message)
     .map((step, index) => ({ ...step, order: index + 1 }));
@@ -516,6 +529,7 @@ export async function POST(request: NextRequest) {
       followPromptButtonLabel: parsed.data.requireFollow
         ? parsed.data.followPromptButtonLabel || null
         : null,
+      stopOnReply: parsed.data.stopOnReply,
       publicReplyEnabled: parsed.data.publicReplyEnabled,
       publicReplyMessages: parsed.data.publicReplyEnabled
         ? publicReplyList
@@ -711,6 +725,7 @@ export async function PATCH(request: NextRequest) {
       .map((step) => ({
         message: step.message.trim(),
         delayMinutes: Math.max(0, Math.min(1440, step.delayMinutes ?? 0)),
+        condition: step.condition ?? "ALWAYS",
       }))
       .filter((step) => step.message)
       .map((step, index) => ({ ...step, order: index + 1 }));

@@ -5,7 +5,7 @@ import { signIn } from "@/lib/auth";
 import { getCampaignTemplate } from "@/lib/templates/campaign-templates";
 
 export const metadata = {
-  title: "Entrar — OpenReply",
+  title: "Entrar — Anzol",
   description: "Entre para gerenciar suas automações de comentário para DM no Instagram.",
 };
 
@@ -64,7 +64,7 @@ export default async function LoginPage({
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-semibold text-foreground">
-            OpenReply
+            Anzol
           </h1>
           <p className="text-muted text-sm leading-relaxed mt-2">
             {selectedTemplate

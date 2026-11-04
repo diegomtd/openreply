@@ -27,8 +27,25 @@ export async function GET(request: NextRequest, { params }: RedirectRouteProps) 
     return NextResponse.redirect(new URL("/", request.url), { status: 302 });
   }
 
+  // `?c=` diz de quem é o clique (o link saiu numa DM para esse contato). Só é
+  // aceito se o contato for da mesma conta do link: um id trocado na URL não
+  // pode marcar clique em contato de outra conta.
+  const contactRef = new URL(request.url).searchParams.get("c");
+  let contactId: string | null = null;
+  if (contactRef && contactRef.length <= 64) {
+    const contact = await prisma.contact.findFirst({
+      where: {
+        id: contactRef,
+        instagramAccountId: trackedLink.automation.instagramAccountId,
+      },
+      select: { id: true },
+    });
+    contactId = contact?.id ?? null;
+  }
+
   await prisma.linkClick.create({
     data: {
+      contactId,
       workspaceId: trackedLink.workspaceId,
       automationId: trackedLink.automationId,
       instagramAccountId: trackedLink.automation.instagramAccountId,

@@ -13,6 +13,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import type { StepCondition } from "@/lib/funnels/sequence";
+import { FUNNEL_STRATEGIES, findFunnelStrategy } from "@/lib/funnels/strategies";
 import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
@@ -51,7 +53,13 @@ interface LoadedCampaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
-  steps?: { order: number; message: string; delayMinutes: number }[];
+  steps?: {
+    order: number;
+    message: string;
+    delayMinutes: number;
+    condition?: StepCondition;
+  }[];
+  stopOnReply?: boolean;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -214,8 +222,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // relativo ao anterior.
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [steps, setSteps] = useState<
-    { message: string; delayMinutes: number }[]
-  >([{ message: "", delayMinutes: 0 }]);
+    { message: string; delayMinutes: number; condition: StepCondition }[]
+  >([{ message: "", delayMinutes: 0, condition: "ALWAYS" }]);
+  // Funil: o robô sai da conversa quando a pessoa responde no meio da sequência.
+  const [stopOnReply, setStopOnReply] = useState(false);
+  const [strategySlug, setStrategySlug] = useState("");
   // Once per person is the default on purpose: the alternative is re-sending the
   // same automated message to someone who already has it.
   const [sendFrequency, setSendFrequency] =
@@ -351,20 +362,23 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             ? c.steps.map((step) => ({
                 message: step.message,
                 delayMinutes: step.delayMinutes,
+                condition: step.condition ?? ("ALWAYS" as StepCondition),
               }))
             : c.followUpMessage
               ? [
                   {
                     message: c.followUpMessage,
                     delayMinutes: c.followUpDelayMinutes ?? 0,
+                    condition: "ALWAYS" as StepCondition,
                   },
                 ]
               : [];
+        setStopOnReply(c.stopOnReply ?? false);
         setFollowUpEnabled(loadedSteps.length > 0);
         setSteps(
           loadedSteps.length > 0
             ? loadedSteps
-            : [{ message: "", delayMinutes: 0 }]
+            : [{ message: "", delayMinutes: 0, condition: "ALWAYS" }]
         );
         setSendFrequency(c.sendFrequency ?? "ONCE_PER_CONTACT");
         setResendCooldownHours(c.resendCooldownHours ?? 24);
@@ -399,6 +413,36 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       cancelled = true;
     };
   }, [selectedAccountId, mode, campaignId]);
+
+  // Preenche o construtor com um funil pronto (lib/funnels/strategies.ts). Não
+  // toca em conta, post nem link: isso é de cada campanha.
+  function applyStrategy(slug: string) {
+    setStrategySlug(slug);
+    const st = findFunnelStrategy(slug);
+    if (!st) return;
+    if (!name.trim()) setName(st.title);
+    setMatchMode("specific");
+    setKeywordText(st.keywords.join(", "));
+    setOpeningDmEnabled(Boolean(st.openingDmMessage));
+    setOpeningDmMessage(st.openingDmMessage);
+    setOpeningDmButtonLabel(st.openingDmButtonLabel);
+    setDmMessage(st.dmMessage);
+    setLinkButtonLabel(st.linkButtonLabel);
+    setLinkOpen(true);
+    setRequireFollow(st.requireFollow);
+    setPublicReplyEnabled(st.publicReplyMessages.length > 0);
+    setPublicReplyMessages(
+      st.publicReplyMessages.length > 0 ? [...st.publicReplyMessages] : [""]
+    );
+    setFollowUpEnabled(st.steps.length > 0);
+    setSteps(
+      st.steps.length > 0
+        ? st.steps.map((step) => ({ ...step }))
+        : [{ message: "", delayMinutes: 0, condition: "ALWAYS" }]
+    );
+    setStopOnReply(st.stopOnReply);
+    if (st.slug === "story-enquete") setStoryReplyTriggerEnabled(true);
+  }
 
   // Prefill the editable fields from one queued import row. The reel is left
   // unset so the user picks it per row.
@@ -523,9 +567,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             .map((step) => ({
               message: step.message.trim(),
               delayMinutes: step.delayMinutes,
+              condition: step.condition,
             }))
             .filter((step) => step.message)
         : [],
+      stopOnReply: followUpEnabled ? stopOnReply : false,
       sendFrequency,
       resendCooldownHours,
       requiredTags: parseTagList(requiredTagsText),
@@ -767,6 +813,34 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             </div>
           )}
         </div>
+
+        {mode === "new" && (
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <label className="text-sm text-foreground" htmlFor="funnel-strategy">
+              Começar de um funil pronto
+            </label>
+            <select
+              id="funnel-strategy"
+              value={strategySlug}
+              onChange={(e) => applyStrategy(e.target.value)}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+            >
+              <option value="">Em branco</option>
+              {FUNNEL_STRATEGIES.map((st) => (
+                <option key={st.slug} value={st.slug}>
+                  {st.title}
+                </option>
+              ))}
+            </select>
+            {strategySlug && (
+              <p className="text-xs text-muted">
+                {findFunnelStrategy(strategySlug)?.content}{" "}
+                {findFunnelStrategy(strategySlug)?.why} Troque o link e os textos
+                pelo seu.
+              </p>
+            )}
+          </div>
+        )}
 
         <Section title="Quando alguém comentar em">
           <Radio
@@ -1158,6 +1232,26 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                         {index === 0 ? "minutos depois do link" : "minutos"}
                       </span>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted">Enviar para</span>
+                      <select
+                        value={step.condition}
+                        onChange={(e) =>
+                          setSteps((prev) =>
+                            prev.map((sp, i) =>
+                              i === index
+                                ? { ...sp, condition: e.target.value as StepCondition }
+                                : sp
+                            )
+                          )
+                        }
+                        className="rounded-lg border border-border bg-surface px-2 py-1 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                      >
+                        <option value="ALWAYS">todo mundo</option>
+                        <option value="NOT_CLICKED">quem ainda não clicou no link</option>
+                        <option value="CLICKED">quem já clicou no link</option>
+                      </select>
+                    </div>
                   </div>
                 ))}
 
@@ -1167,7 +1261,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     onClick={() =>
                       setSteps((prev) => [
                         ...prev,
-                        { message: "", delayMinutes: 60 },
+                        { message: "", delayMinutes: 60, condition: "ALWAYS" },
                       ])
                     }
                     className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
@@ -1176,9 +1270,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   </button>
                 )}
 
+                <div className="flex items-center justify-between rounded-lg border border-border p-2.5">
+                  <span className="text-sm text-foreground">
+                    parar o robô quando a pessoa responder
+                    <span className="ml-1 text-xs text-muted">
+                      a conversa fica para você
+                    </span>
+                  </span>
+                  <Toggle on={stopOnReply} onToggle={() => setStopOnReply(!stopOnReply)} />
+                </div>
                 <p className="text-xs text-muted">
-                  {"{username}"} coloca o @ da pessoa. A sequência para na hora se
-                  ela pedir para parar.
+                  {"{username}"} coloca o @ da pessoa e {"{link}"} repete o link
+                  rastreado. A sequência para na hora se ela pedir para parar.
                 </p>
                 <p
                   className={`text-xs ${

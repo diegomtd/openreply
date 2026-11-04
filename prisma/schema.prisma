@@ -247,6 +247,10 @@ model Automation {
   requiredTags               String[]      @default([])
   /// Nunca envia para quem tem QUALQUER uma destas tags. Vazio = sem exclusão.
   excludedTags               String[]      @default([])
+  /// Funil: quando a pessoa responde no meio da sequência, o robô para e a
+  /// conversa fica para um humano (a Meta exige caminho para atendimento
+  /// humano). Desligado por padrão para não mudar automações que já existem.
+  stopOnReply                Boolean       @default(false)
   reportShareSlug            String?       @unique
   reportShareEnabled         Boolean       @default(true)
 
@@ -285,6 +289,9 @@ model AutomationStep {
   message      String
   /// Minutos a esperar depois do passo anterior (ou depois do link, no passo 1).
   delayMinutes Int    @default(0)
+  /// Quando o passo sai: sempre, só para quem ainda não clicou no link (o
+  /// lembrete) ou só para quem já clicou (a pergunta de qualificação).
+  condition    StepCondition @default(ALWAYS)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -379,6 +386,10 @@ model LinkClick {
   automationId       String
   instagramAccountId String
   trackedLinkId      String
+  /// Quem clicou, quando o link saiu numa DM para uma pessoa conhecida. É o
+  /// que permite o passo "só para quem não clicou". Nulo em cliques antigos e
+  /// em links abertos fora da DM.
+  contactId          String?
   ipHash             String?
   userAgent          String?
   referrer           String?
@@ -388,11 +399,13 @@ model LinkClick {
   automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   trackedLink      TrackedLink      @relation(fields: [trackedLinkId], references: [id], onDelete: Cascade)
+  contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId])
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([trackedLinkId])
+  @@index([contactId, automationId])
   @@index([createdAt])
   @@index([workspaceId, createdAt])
 }
@@ -442,6 +455,7 @@ model Contact {
   /// ela trouxe. Perde-se a origem, não o contato.
   sourceAutomation    Automation?              @relation("ContactSource", fields: [sourceAutomationId], references: [id], onDelete: SetNull)
   broadcastRecipients BroadcastRecipient[]
+  linkClicks          LinkClick[]
 
   @@unique([instagramAccountId, igsid])
   @@index([workspaceId])
@@ -641,6 +655,13 @@ enum DmStatus {
   /// Blocked by the automation's tag condition (a required tag is missing, or an
   /// excluded tag is present).
   SKIPPED_TAG_RULE
+}
+
+/// Condição de um passo da sequência, decidida na hora do envio.
+enum StepCondition {
+  ALWAYS
+  NOT_CLICKED
+  CLICKED
 }
 
 enum SendFrequency {
