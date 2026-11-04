@@ -1,14 +1,23 @@
 <div align="center">
 
-# OpenReply
+# Anzol
 
-Open-sourced ManyChat for Instagram comment-to-DM automation.
+Funis de conteúdo para DM no Instagram do Oceano Azul: comentário com palavra-chave → DM com botão → link rastreado → follow-up condicional, tudo pela API oficial da Meta.
+
+Fork do [OpenReply](https://github.com/diwenne/openreply) (licença MIT, aviso de copyright mantido em `LICENSE`). Os nomes técnicos (`OPENREPLY_*`, pacote `openreply`) seguem iguais para não quebrar deploy nem integrações.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/diwenne/openreply?style=flat&color=black)](https://github.com/diwenne/openreply/stargazers)
 [![Built with Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org)
 
 </div>
+
+## Funis (novo no Anzol)
+
+- **Funis prontos** no construtor ("Começar de um funil pronto"), um por tipo de conteúdo: Reel educativo, prova → oferta, carrossel salvável, story de conversa e lista de espera. Código em `lib/funnels/strategies.ts`.
+- **Follow-up condicional**: cada passo da sequência vai para todo mundo, só para quem não clicou no link (lembrete) ou só para quem clicou (qualificação). O clique é ligado ao contato pelo `?c=` do link rastreado.
+- **Parar quando a pessoa responder**: o robô sai e a conversa fica para um humano.
+- **Janela de 24h respeitada antes de chamar a Meta**: o toque no botão abre a janela; passado o prazo, a sequência para sem tentar enviar. Regra em `lib/funnels/sequence.ts`.
 
 Someone comments `LINK` on your reel, and they get a DM with your link a second later. That is the whole idea. OpenReply watches the comments on your Instagram posts, and when a comment matches a keyword you set, it sends that person a private reply through the official Meta API. You can also post a public reply under the comment at the same time.
 

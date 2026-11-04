@@ -14,7 +14,7 @@ export const authConfig = {
   providers: [
     Resend({
       apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
-      from: process.env.EMAIL_FROM ?? "OpenReply <login@example.com>",
+      from: process.env.EMAIL_FROM ?? "Anzol <login@example.com>",
     }),
     // Login com e-mail e senha, para quem foi convidado direto (Configurações
     // → Time → "Criar acesso direto") sem depender de receber e clicar num

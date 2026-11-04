@@ -44,6 +44,9 @@ const {
     automationStep: {
       findFirst: vi.fn(),
     },
+    linkClick: {
+      count: vi.fn(),
+    },
     $transaction: vi.fn(),
     operationalEvent: {
       create: vi.fn(),
@@ -268,6 +271,7 @@ beforeEach(() => {
   mockPrisma.contactAutomationState.upsert.mockResolvedValue({});
   // Sem sequência configurada, por padrão: nada é agendado depois do link.
   mockPrisma.automationStep.findFirst.mockResolvedValue(null);
+  mockPrisma.linkClick.count.mockResolvedValue(0);
   mockPrisma.$transaction.mockImplementation(async (ops: unknown) =>
     Array.isArray(ops) ? Promise.all(ops) : ops
   );
@@ -589,8 +593,8 @@ describe("DM Worker — Full Pipeline", () => {
       "comment_555",
       "Hey commenter_user! Here is the offer:",
       [
-        { title: "Get offer", url: "http://localhost:3000/r/abc123" },
-        { title: "Book a call", url: "http://localhost:3000/r/def456" },
+        { title: "Get offer", url: "http://localhost:3000/r/abc123?c=contact_1" },
+        { title: "Book a call", url: "http://localhost:3000/r/def456?c=contact_1" },
       ]
     );
   });
@@ -660,7 +664,7 @@ describe("DM Worker — Full Pipeline", () => {
       "ig_456",
       "comment_555",
       "Hey commenter_user! Here is the offer:",
-      [{ title: "Get offer", url: "http://localhost:3000/r/abc123" }]
+      [{ title: "Get offer", url: "http://localhost:3000/r/abc123?c=contact_1" }]
     );
   });
 
@@ -996,6 +1000,103 @@ describe("DM Worker — message sequence after the link", () => {
 
     const processor = getProcessor();
     await processor(createMockStepJob());
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should mark the tap as an inbound message so the 24h window is known", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.contact.findUnique.mockResolvedValue({ id: "contact_1", optedOut: false });
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockPrisma.contact.update).toHaveBeenCalledWith({
+      where: { id: "contact_1" },
+      data: { lastInboundAt: expect.any(Date) },
+    });
+  });
+
+  it("should carry when the chain started into every step", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockPrisma.automationStep.findFirst.mockResolvedValue({ order: 1, delayMinutes: 10 });
+
+    const processor = getProcessor();
+    await processor(createMockPostbackJob());
+
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ chainStartedAt: expect.any(String) }),
+      expect.anything()
+    );
+  });
+
+  it("should skip a 'not clicked' reminder for someone who clicked, and keep the chain", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      ...automationWithStep({ order: 1, message: "vi que você não abriu" }),
+      steps: [{ order: 1, message: "vi que você não abriu", delayMinutes: 0, condition: "NOT_CLICKED" }],
+    });
+    mockPrisma.contact.findUnique.mockResolvedValue({ id: "contact_1", optedOut: false, lastInboundAt: new Date() });
+    mockPrisma.linkClick.count.mockResolvedValue(1);
+    mockPrisma.automationStep.findFirst.mockResolvedValue({ order: 2, delayMinutes: 0 });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ chainStartedAt: new Date().toISOString() }));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      expect.objectContaining({ stepOrder: 2 }),
+      expect.anything()
+    );
+  });
+
+  it("should send the 'not clicked' reminder to someone who did not click", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      ...mockAutomation,
+      steps: [{ order: 1, message: "vi que você não abriu", delayMinutes: 0, condition: "NOT_CLICKED" }],
+    });
+    mockPrisma.contact.findUnique.mockResolvedValue({ id: "contact_1", optedOut: false, lastInboundAt: new Date() });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ chainStartedAt: new Date().toISOString() }));
+
+    expect(mockPrisma.linkClick.count).toHaveBeenCalledWith({
+      where: { automationId: "auto_789", contactId: "contact_1" },
+    });
+    expect(mockSendDirectMessage).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "vi que você não abriu"
+    );
+  });
+
+  it("should stop the bot when the person replied and the funnel hands over to a human", async () => {
+    const started = new Date(Date.now() - 60 * 60_000);
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      ...automationWithStep({ order: 1, message: "e aí?" }),
+      stopOnReply: true,
+    });
+    mockPrisma.contact.findUnique.mockResolvedValue({ id: "contact_1", optedOut: false, lastInboundAt: new Date() });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ chainStartedAt: started.toISOString() }));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("should not call Meta when the 24h window has already closed", async () => {
+    const old = new Date(Date.now() - 25 * 60 * 60_000);
+    mockPrisma.automation.findFirst.mockResolvedValue(
+      automationWithStep({ order: 1, message: "e aí?" })
+    );
+    mockPrisma.contact.findUnique.mockResolvedValue({ id: "contact_1", optedOut: false, lastInboundAt: old });
+
+    const processor = getProcessor();
+    await processor(createMockStepJob({ chainStartedAt: old.toISOString() }));
 
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
     expect(mockQueueAdd).not.toHaveBeenCalled();

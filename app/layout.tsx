@@ -3,7 +3,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "OpenReply — Automação de comentário para DM no Instagram",
+  title: "Anzol — Automação de comentário para DM no Instagram",
   description:
     "Alternativa ao ManyChat, gratuita e no seu próprio servidor. Envia um DM automático quando alguém comenta uma palavra-chave no seu post ou reel, pela API oficial da Meta.",
   keywords: [

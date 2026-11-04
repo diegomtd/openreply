@@ -50,14 +50,23 @@ export function renderMessageWithoutLink({
     .trim();
 }
 
-export function buildTrackedUrl(slug: string, baseUrl?: string) {
+/**
+ * `contactId` marca de quem é o clique (`?c=`), para o funil saber quem já abriu
+ * o link. É o id interno do contato, nunca o IGSID.
+ */
+export function buildTrackedUrl(
+  slug: string,
+  baseUrl?: string,
+  contactId?: string | null
+) {
   const resolvedBaseUrl =
     baseUrl ??
     (typeof window !== "undefined"
       ? window.location.origin
       : process.env.NEXTAUTH_URL ?? "http://localhost:3000");
 
-  return `${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`;
+  const url = `${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`;
+  return contactId ? `${url}?c=${encodeURIComponent(contactId)}` : url;
 }
 
 /**
@@ -80,18 +89,20 @@ export function renderMessageWithTracking({
   commenterName,
   trackedLinks,
   baseUrl,
+  contactId,
 }: {
   message: string;
   commenterName?: string | null;
   trackedLinks?: MessageTrackedLink[];
   baseUrl?: string;
+  contactId?: string | null;
 }) {
   let rendered = replaceUsername(message, commenterName);
   const primaryLink = trackedLinks?.[0];
 
   if (!primaryLink) return rendered;
 
-  const trackedUrl = buildTrackedUrl(primaryLink.slug, baseUrl);
+  const trackedUrl = buildTrackedUrl(primaryLink.slug, baseUrl, contactId);
 
   if (/\{link\}/i.test(rendered)) {
     return rendered.replace(/\{link\}/gi, trackedUrl);

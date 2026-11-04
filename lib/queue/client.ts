@@ -58,6 +58,8 @@ export interface ProcessFollowUpJob {
   automationId: string;
   commenterName?: string | null;
   stepOrder?: number;
+  /** ISO de quando o link saiu; base da janela de 24h e do "parar se responder". */
+  chainStartedAt?: string | null;
 }
 
 // An inbound message from a user — a plain DM, a reply to one of the account's

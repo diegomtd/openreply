@@ -46,6 +46,7 @@ import {
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
 import { isWindowOpen } from "@/lib/broadcast/window";
+import { decideSequenceStep } from "@/lib/funnels/sequence";
 import { isTokenDead, markTokenInvalid } from "@/lib/meta/account-health";
 import {
   buildTrackedUrl,
@@ -97,10 +98,11 @@ type WorkerTrackedLink = {
  */
 function buildLinkButtons(
   trackedLinks: WorkerTrackedLink[],
-  primaryLabel: string | null
+  primaryLabel: string | null,
+  contactId?: string | null
 ): { title: string; url: string }[] {
   return trackedLinks.slice(0, 3).map((link, index) => ({
-    url: buildTrackedUrl(link.slug),
+    url: buildTrackedUrl(link.slug, undefined, contactId),
     title: (index === 0 ? primaryLabel : link.label) || link.label || "Abrir link",
   }));
 }
@@ -114,12 +116,15 @@ function buildInlineLinkFallback(
   message: string,
   commenterName: string | null | undefined,
   trackedLinks: WorkerTrackedLink[],
-  bodyText: string
+  bodyText: string,
+  contactId?: string | null
 ): string {
   const base =
-    renderMessageWithTracking({ message, commenterName, trackedLinks }) ||
+    renderMessageWithTracking({ message, commenterName, trackedLinks, contactId }) ||
     bodyText;
-  const extraUrls = trackedLinks.slice(1).map((link) => buildTrackedUrl(link.slug));
+  const extraUrls = trackedLinks
+    .slice(1)
+    .map((link) => buildTrackedUrl(link.slug, undefined, contactId));
   return extraUrls.length > 0 ? `${base}\n${extraUrls.join("\n")}` : base;
 }
 
@@ -140,7 +145,8 @@ async function sendRevealDirectMessage(
   automation: RevealAutomation,
   userId: string,
   commenterName: string | null,
-  context: string
+  context: string,
+  contactId?: string | null
 ): Promise<void> {
   if (automation.trackedLinks.length === 0) {
     await sendDirectMessage(
@@ -151,6 +157,7 @@ async function sendRevealDirectMessage(
         message: automation.dmMessage,
         commenterName,
         trackedLinks: automation.trackedLinks,
+        contactId,
       })
     );
     return;
@@ -164,7 +171,8 @@ async function sendRevealDirectMessage(
     }) || "Aqui está seu link:";
   const buttons = buildLinkButtons(
     automation.trackedLinks,
-    automation.linkButtonLabel
+    automation.linkButtonLabel,
+    contactId
   );
 
   try {
@@ -193,7 +201,8 @@ async function sendRevealDirectMessage(
           automation.dmMessage,
           commenterName,
           automation.trackedLinks,
-          bodyText
+          bodyText,
+          contactId
         )
       );
     } catch {
@@ -671,7 +680,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           }) || "Aqui está seu link:";
         const buttons = buildLinkButtons(
           automation.trackedLinks,
-          automation.linkButtonLabel
+          automation.linkButtonLabel,
+          commentContact.id
         );
 
         try {
@@ -696,7 +706,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             automation.dmMessage,
             commenterName,
             automation.trackedLinks,
-            bodyText
+            bodyText,
+            commentContact.id
           );
           try {
             await sendPrivateReply(
@@ -717,6 +728,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           message: automation.dmMessage,
           commenterName,
           trackedLinks: automation.trackedLinks,
+          contactId: commentContact.id,
         });
         await sendPrivateReply(
           accessToken,
@@ -834,6 +846,16 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     return;
   }
 
+  // Um toque de verdade no botão é a pessoa interagindo: abre a janela de 24h
+  // da Meta. Registrar isso é o que deixa o funil (e o Envio ativo) saber até
+  // quando dá para falar com ela. O fallback de leitura não é toque.
+  if (contact && !fallback) {
+    await prisma.contact.update({
+      where: { id: contact.id },
+      data: { lastInboundAt: new Date() },
+    });
+  }
+
   // Duplicate sends are enabled: every button tap re-sends the reveal
   // instead of only firing once per person.
   const dedupeId = `reveal:${userId}`;
@@ -927,7 +949,8 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       automation,
       userId,
       commenterName,
-      "postback"
+      "postback",
+      contact?.id
     );
     // The link is out, so the sequence starts. Each step schedules the next one
     // as it lands, so nothing after an opt-out is ever sent.
@@ -1008,6 +1031,8 @@ async function scheduleSequenceStep(params: {
   automationId: string;
   commenterName?: string | null;
   afterOrder: number;
+  /** Quando o link saiu. Vazio no primeiro agendamento: vira "agora". */
+  chainStartedAt?: string | null;
 }): Promise<void> {
   const next = await prisma.automationStep.findFirst({
     where: {
@@ -1029,6 +1054,7 @@ async function scheduleSequenceStep(params: {
       automationId: params.automationId,
       commenterName: params.commenterName ?? null,
       stepOrder: next.order,
+      chainStartedAt: params.chainStartedAt ?? new Date().toISOString(),
     },
     {
       delay: Math.max(0, next.delayMinutes) * 60_000,
@@ -1057,6 +1083,10 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     include: {
       instagramAccount: true,
       steps: { where: { order: stepOrder }, take: 1 },
+      trackedLinks: {
+        select: { slug: true, label: true, destinationUrl: true },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
 
@@ -1081,9 +1111,44 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
         igsid: userId,
       },
     },
-    select: { optedOut: true },
+    select: { id: true, optedOut: true, lastInboundAt: true },
   });
   if (contact?.optedOut) return;
+
+  const chainStartedAt = job.data.chainStartedAt
+    ? new Date(job.data.chainStartedAt)
+    : null;
+  const clicked =
+    step.condition !== "ALWAYS" && contact
+      ? (await prisma.linkClick.count({
+          where: { automationId: automation.id, contactId: contact.id },
+        })) > 0
+      : false;
+  const decision = decideSequenceStep({
+    condition: step.condition,
+    clicked,
+    stopOnReply: automation.stopOnReply,
+    chainStartedAt,
+    lastInboundAt: contact?.lastInboundAt ?? null,
+  });
+  if (decision.action === "stop") {
+    console.log(
+      `[DM Worker] Sequence stopped at step ${stepOrder} (${decision.reason})`
+    );
+    return;
+  }
+  const chainParams = {
+    instagramAccountId,
+    userId,
+    automationId,
+    commenterName,
+    afterOrder: stepOrder,
+    chainStartedAt: job.data.chainStartedAt ?? null,
+  };
+  if (decision.action === "skip") {
+    await scheduleSequenceStep(chainParams);
+    return;
+  }
 
   let accessToken: string;
   try {
@@ -1097,10 +1162,19 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
       accessToken,
       automation.instagramAccount.instagramId,
       userId,
-      renderMessageWithoutLink({
-        message: step.message,
-        commenterName: commenterName ?? null,
-      })
+      // {link} no passo vira o link rastreado (é o lembrete "não abriu? tá
+      // aqui"); sem link na automação, o marcador some como antes.
+      (automation.trackedLinks?.length ?? 0) > 0
+        ? renderMessageWithTracking({
+            message: step.message,
+            commenterName: commenterName ?? null,
+            trackedLinks: automation.trackedLinks,
+            contactId: contact?.id,
+          })
+        : renderMessageWithoutLink({
+            message: step.message,
+            commenterName: commenterName ?? null,
+          })
     );
   } catch (error) {
     console.log(
@@ -1112,13 +1186,7 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     return;
   }
 
-  await scheduleSequenceStep({
-    instagramAccountId,
-    userId,
-    automationId,
-    commenterName,
-    afterOrder: stepOrder,
-  });
+  await scheduleSequenceStep(chainParams);
 }
 
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
@@ -1376,7 +1444,8 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
             ? "story mention trigger"
             : trigger === "STORY_REPLY"
               ? "story reply trigger"
-              : "message trigger"
+              : "message trigger",
+          contact.id
         );
 
         // The link has been delivered, so the sequence applies here exactly as it
