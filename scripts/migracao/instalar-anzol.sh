@@ -30,8 +30,31 @@ rota() {
   cat "$TRAEFIK/anzol.yaml"
   exit 0
 }
+chaves() {
+  [ -f "$ENV" ] || { echo "Rode primeiro: bash instalar-anzol.sh"; exit 1; }
+  read -rp  "Instagram App ID (Meta > ConteudOS > Instagram > Configuração da API): " igid
+  read -rsp "Instagram App Secret (mesma tela, botão Mostrar), cole e Enter: " igsec; echo
+  read -rsp "Chave secreta do app (Configurações do app > Básico), cole e Enter: " fbsec; echo
+  read -rsp "Chave da Resend (re_...), cole e Enter: " resend; echo
+  python3 - "$ENV" "$igid" "$igsec" "$fbsec" "$resend" <<'PY'
+import sys
+f, igid, igsec, fbsec, rs = sys.argv[1:]
+novos = {"INSTAGRAM_APP_ID": igid, "INSTAGRAM_APP_SECRET": igsec, "FACEBOOK_APP_SECRET": fbsec, "RESEND_API_KEY": rs}
+linhas = [l for l in open(f).read().splitlines() if l.split("=", 1)[0] not in novos or not novos[l.split("=", 1)[0]]]
+linhas += [f"{k}={v}" for k, v in novos.items() if v]
+open(f, "w").write("\n".join(linhas) + "\n")
+PY
+  chmod 600 "$ENV"
+  for n in web worker cron; do
+    docker rm -f "anzol-$n" >/dev/null 2>&1 || true
+  done
+  SO_SUBIR=1
+}
 [ "${1:-}" = "rota" ] && rota
+SO_SUBIR=0
+[ "${1:-}" = "chaves" ] && chaves
 
+if [ "$SO_SUBIR" = 0 ]; then
 echo "== 1/5 Código"
 mkdir -p "$O"
 if [ -d "$O/app/.git" ]; then git -C "$O/app" pull -q --ff-only; else git clone -q --depth 1 https://github.com/diegomtd/openreply.git "$O/app"; fi
@@ -41,10 +64,7 @@ echo "== 2/5 Chaves"
 if [ ! -f "$ENV" ]; then
   tok=$(grep -hs '^OPENREPLY_AGENT_TOKEN=' /root/firma/.env /etc/a-firma/*.env /opt/a-firma/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true)
   [ -n "$tok" ] && ok "reaproveitei o token do agente que o Netuno/Firma já usam" || tok=$(openssl rand -hex 32)
-  read -rp  "Instagram App ID (Meta > ConteudOS > Instagram > Configuração da API): " igid
-  read -rsp "Instagram App Secret (mesma tela, botão Mostrar), cole e Enter: " igsec; echo
-  read -rsp "App Secret do app (Configurações do app > Básico > Chave secreta), cole e Enter: " fbsec; echo
-  read -rsp "Chave da Resend (re_..., para o login por e-mail), cole e Enter: " resend; echo
+  igid=pendente; igsec=pendente; fbsec=pendente; resend=pendente
   pgp=$(openssl rand -hex 24); rdp=$(openssl rand -hex 24)
   cat > "$ENV" <<EOF
 NEXTAUTH_URL=https://$DOMINIO
@@ -91,6 +111,7 @@ for n in web worker cron; do
   docker build -q -t "anzol/$n" -f "$O/app/$df" "$O/app" >/dev/null
   ok "imagem $n"
 done
+fi
 
 echo "== 5/5 Subindo web, worker e cron"
 d0=$(ip -4 -o addr show docker0 2>/dev/null | grep -oE 'inet [0-9.]+' | cut -d' ' -f2 || true)
@@ -109,4 +130,5 @@ done
 [ "${c:-000}" = 000 ] && { echo "  web não respondeu. Últimas linhas:"; docker logs --tail 20 anzol-web 2>&1 | grep -viE 'secret|key|password' ; }
 echo
 docker ps --filter name=anzol --format '{{.Names}} | {{.Status}}'
+grep -q "=pendente" "$ENV" && echo "FALTA: chaves da Meta e da Resend. Rode: bash instalar-anzol.sh chaves"
 echo "PRONTO. Próximo: apontar o DNS de $DOMINIO para 169.58.190.45 e rodar: bash instalar-anzol.sh rota"
