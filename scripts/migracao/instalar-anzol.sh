@@ -22,9 +22,24 @@ rota() {
   else
     url="http://$(ip -4 -o addr show docker0 | grep -oE 'inet [0-9.]+' | cut -d' ' -f2):$PORTA"
   fi
-  sed -E -e "s/firma\.oceanoazul\.tech/$DOMINIO/g" \
-         -e "s#(url:[[:space:]]*)[\"']?[^\"'[:space:]]+[\"']?#\1\"$url\"#" \
-         -e "s/firma/anzol/g" "$modelo" > "$TRAEFIK/anzol.yaml"
+  python3 - "$modelo" "$TRAEFIK/anzol.yaml" "$DOMINIO" "$url" <<'PY'
+import json, re, sys
+src, dst, dominio, url = sys.argv[1:]
+txt = open(src).read()
+def troca(o):
+    if isinstance(o, dict):
+        return {troca(k): (url if k == "url" else troca(v)) for k, v in o.items()}
+    if isinstance(o, list):
+        return [troca(v) for v in o]
+    if isinstance(o, str):
+        return o.replace("firma.oceanoazul.tech", dominio).replace("firma", "anzol")
+    return o
+try:
+    dados = json.loads(txt)
+except ValueError:
+    sys.exit("firma.yaml não é JSON; me avise para ajustar.")
+open(dst, "w").write(json.dumps(troca(dados), indent=2))
+PY
   chmod 644 "$TRAEFIK/anzol.yaml"
   ok "rota criada ($DOMINIO -> $url). Conteúdo:"
   cat "$TRAEFIK/anzol.yaml"
