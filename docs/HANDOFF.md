@@ -99,7 +99,7 @@ em `docs/agent-api.md`, roteador em `lib/agent/router.ts`.
 
 ### Cron endpoints (`app/api/cron/*`, protegidos por `CRON_SECRET`)
 
-`refresh-tokens` (05h) · `attach-next-reel` (06h) · `snapshot-followers` (07h) ·
+`refresh-tokens` (05h) · `attach-next-reel` (a cada 10 min: o funil do "próximo Reel" tem que estar no ar quando o post sai) · `snapshot-followers` (07h) ·
 `prune` (03h30, retenção de dados)
 
 Registrados em dois lugares: `cron-entrypoint.sh` (VPS/EasyPanel, o que vale em
