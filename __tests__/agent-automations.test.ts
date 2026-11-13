@@ -8,6 +8,7 @@ const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
     instagramAccount: { findFirst: vi.fn(), findMany: vi.fn() },
     automation: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+    contact: { findFirst: vi.fn(), update: vi.fn() },
   },
 }));
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
@@ -74,5 +75,39 @@ describe("automações pela API de agentes", () => {
     const ativas = [{ name: "X", postId: "p2", matchAnyPost: false, matchAnyWord: false, keywords: ["firma"] }];
     expect(keywordConflicts(["firma"], "p1", ativas)).toEqual([]);
     expect(keywordConflicts(["FIRMA!"], "p2", ativas)).toHaveLength(1);
+  });
+
+  it("funil: passos em ordem, robô sai quando a pessoa responde, gatilho no direct opcional", async () => {
+    const steps = [
+      { message: "Conseguiu abrir?", delayMinutes: 180, condition: "NOT_CLICKED" },
+      { message: "Me conta: tu usaria pra quê?", delayMinutes: 60, condition: "CLICKED" },
+    ];
+    const res = await req("POST", "accounts/acc1/automations", { ...valido, steps, dmTrigger: true });
+    expect(res.status).toBe(201);
+    const data = mockPrisma.automation.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ stopOnReply: true, dmTriggerEnabled: true, isActive: false });
+    expect(data.steps.create).toEqual([
+      { order: 1, message: "Conseguiu abrir?", delayMinutes: 180, condition: "NOT_CLICKED" },
+      { order: 2, message: "Me conta: tu usaria pra quê?", delayMinutes: 60, condition: "CLICKED" },
+    ]);
+  });
+
+  it("funil: recusa atrasos que passam de 24 h e mais de 3 passos", async () => {
+    const longo = [{ message: "a", delayMinutes: 1000 }, { message: "b", delayMinutes: 500 }];
+    expect((await req("POST", "accounts/acc1/automations", { ...valido, steps: longo })).status).toBe(400);
+    const muitos = [1, 2, 3, 4].map((n) => ({ message: "m" + n }));
+    expect((await req("POST", "accounts/acc1/automations", { ...valido, steps: muitos })).status).toBe(400);
+    expect(mockPrisma.automation.create).not.toHaveBeenCalled();
+  });
+
+  it("etiqueta e nota do contato: só formato válido, sem mexer em opt-out", async () => {
+    mockPrisma.contact.findFirst.mockResolvedValue({ id: "c1", tags: ["veio-do-reel", "frio"] });
+    mockPrisma.contact.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ igsid: "u1", username: "ana", ...data }));
+    const res = await req("POST", "accounts/acc1/contacts/u1/tags", { add: ["Lead-Quente", "com espaço"], remove: ["frio"], note: "  quer pra imobiliária  " });
+    expect(res.status).toBe(200);
+    const data = mockPrisma.contact.update.mock.calls[0][0].data;
+    expect(data).toEqual({ tags: ["veio-do-reel", "lead-quente"], note: "quer pra imobiliária" });
+    mockPrisma.contact.findFirst.mockResolvedValue(null);
+    expect((await req("POST", "accounts/acc1/contacts/x/tags", { add: ["a"] })).status).toBe(404);
   });
 });

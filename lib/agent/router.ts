@@ -360,10 +360,30 @@ async function listContacts(account: InstagramAccount, query: URLSearchParams) {
       optedOut: true,
       tags: true,
       note: true,
+      sourceAutomationId: true,
+      lastAutomationSentAt: true,
       updatedAt: true,
     },
   });
   return ok({ account: account.username, contacts });
+}
+
+// Etiquetas e nota de um contato (13/11): a Firma marca "lead-quente", "cliente"
+// etc. e deixa um resumo curto da memória do lead, que aparece na tela Contatos.
+// Só etiqueta e nota: optar por sair continua sendo da pessoa ou do dono.
+const TAG = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+async function tagContact(account: InstagramAccount, igsid: string, body: unknown) {
+  const b = (body ?? {}) as { add?: unknown; remove?: unknown; note?: unknown };
+  const norm = (v: unknown) => (Array.isArray(v) ? v : []).map((t) => String(t).trim().toLowerCase()).filter((t) => TAG.test(t)).slice(0, 10);
+  const add = norm(b.add);
+  const remove = new Set(norm(b.remove));
+  const found = await prisma.contact.findFirst({ where: { instagramAccountId: account.id, igsid } });
+  if (!found) return fail(404, `Contact not found: ${igsid}`);
+  const tags = Array.from(new Set([...found.tags.filter((t) => !remove.has(t)), ...add])).slice(0, 30);
+  const data: { tags: string[]; note?: string | null } = { tags };
+  if (typeof b.note === "string") data.note = b.note.trim().slice(0, 2000) || null;
+  const updated = await prisma.contact.update({ where: { id: found.id }, data, select: { igsid: true, username: true, tags: true, note: true } });
+  return ok({ contact: updated });
 }
 
 async function accountInsights(account: InstagramAccount, token: string, query: URLSearchParams) {
@@ -490,6 +510,9 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
 
     if (method === "GET" && resource === "contacts" && !id) {
       return await listContacts(account, query);
+    }
+    if (method === "POST" && resource === "contacts" && id && action === "tags") {
+      return await tagContact(account, decodeURIComponent(id), body);
     }
     // Automações não chamam a Meta: não precisam do token decifrado.
     if (resource === "automations") {

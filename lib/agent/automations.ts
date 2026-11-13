@@ -19,6 +19,10 @@ const normalizeKeyword = (k: string) => stripSpecialCharacters(k).toLowerCase();
  * - Frequência nunca é "sempre"; padrão é uma vez por pessoa.
  * - Recusa palavra-chave que outra automação ativa da conta já usa no mesmo post.
  * - Pausar sempre pode; apagar não existe aqui.
+ * - Funil (13/11): até 3 passos depois do link (lembrete p/ quem não clicou,
+ *   pergunta p/ quem clicou), soma dos atrasos dentro das 24 h da Meta, e o
+ *   robô sai da conversa quando a pessoa responde (stopOnReply, padrão ligado):
+ *   é aí que a Firma entra com IA, só para quem mostrou interesse.
  */
 
 const MARCA = "Criada pelo agente";
@@ -38,6 +42,23 @@ export const createBody = z
     followPromptMessage: z.string().trim().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().trim().max(20).optional().nullable(),
     sendFrequency: z.enum(["ONCE_PER_CONTACT", "ONCE_PER_POST"]).optional().default("ONCE_PER_CONTACT"),
+    steps: z
+      .array(
+        z.object({
+          message: z.string().trim().min(1).max(1000),
+          delayMinutes: z.number().int().min(0).max(1440).optional().default(0),
+          condition: z.enum(["ALWAYS", "NOT_CLICKED", "CLICKED"]).optional().default("ALWAYS"),
+        })
+      )
+      .max(3)
+      .optional()
+      .default([]),
+    stopOnReply: z.boolean().optional().default(true),
+    /** Também dispara quando a pessoa manda a palavra-chave no direct (estilo ManyChat). */
+    dmTrigger: z.boolean().optional().default(false),
+  })
+  .refine((d) => d.steps.reduce((t, s) => t + s.delayMinutes, 0) <= 1440, {
+    message: "A soma dos atrasos do funil passa de 24h (janela de mensagens do Instagram).",
   })
   .refine((d) => Boolean(d.postId) !== d.pendingNextReel, {
     message: "Informe postId OU pendingNextReel=true (um dos dois).",
@@ -138,6 +159,11 @@ export async function createAutomation(account: InstagramAccount, body: unknown)
       publicReplyMessages: d.publicReplies,
       publicReplyMessage: d.publicReplies[0] ?? null,
       sendFrequency: d.sendFrequency,
+      stopOnReply: d.stopOnReply,
+      dmTriggerEnabled: d.dmTrigger,
+      ...(d.steps.length
+        ? { steps: { create: d.steps.map((st, i) => ({ order: i + 1, message: st.message, delayMinutes: st.delayMinutes, condition: st.condition })) } }
+        : {}),
       isActive: false,
       reportShareSlug: generateReportShareSlug(),
       ...(d.linkUrl
