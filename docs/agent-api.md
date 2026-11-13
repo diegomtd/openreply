@@ -26,12 +26,13 @@ Toda chamada leva `Authorization: Bearer <chave>`. A chave dá leitura de DMs e 
 | GET | `/api/agent/v1/accounts/:conta/conversations` | DMs com `canReply` e fim da janela |
 | GET | `/api/agent/v1/accounts/:conta/conversations/:id` | últimas 20 mensagens |
 | POST | `/api/agent/v1/accounts/:conta/messages` `{recipientId, text}` | DM dentro da janela de 24h |
-| GET | `/api/agent/v1/accounts/:conta/contacts?since=ISO` | contatos, tags e opt-out |
+| GET | `/api/agent/v1/accounts/:conta/contacts?since=ISO` | contatos, tags, nota, opt-out e a automação de origem |
+| POST | `/api/agent/v1/accounts/:conta/contacts/:igsid/tags` `{add?, remove?, note?}` | etiquetas (`a-z0-9_-`) e nota do contato |
 | GET | `/api/agent/v1/logs?since=ISO` | envios e skips das automações |
 | GET | `/api/agent/v1/accounts/:conta/discovery/:perfil?limit=25` | radar: seguidores e últimos posts (curtidas, comentários, views) de outro perfil profissional, com `engagementRate` e `viewsPerFollower` |
 
 | GET | `/api/agent/v1/accounts/:conta/automations` | automações da conta (`byAgent`, `isActive`, envios) |
-| POST | `/api/agent/v1/accounts/:conta/automations` `{name, postId \| pendingNextReel, keywords, dmMessage, linkUrl?, linkButtonLabel?, publicReplies?, requireFollow?, sendFrequency?}` | cria automação de comentário (nasce desligada) |
+| POST | `/api/agent/v1/accounts/:conta/automations` `{name, postId \| pendingNextReel, keywords, dmMessage, linkUrl?, linkButtonLabel?, publicReplies?, requireFollow?, sendFrequency?, steps?, stopOnReply?, dmTrigger?}` | cria automação de comentário (nasce desligada). `steps`: até 3 `{message, delayMinutes, condition: ALWAYS\|NOT_CLICKED\|CLICKED}` com soma ≤ 24 h; `stopOnReply` (padrão `true`) tira o robô quando a pessoa responde; `dmTrigger` também dispara com a palavra no direct |
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/pause` | desliga |
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/activate` | liga, só com `OPENREPLY_AGENT_CAN_ACTIVATE=1` |
 
