@@ -895,3 +895,79 @@ export async function getBusinessDiscovery(
   const { media, ...profile } = raw;
   return { ...profile, media: media?.data ?? [], via };
 }
+
+// ── Publicação de Reels (15/11): Instagram API com Instagram Login. ──
+// Fluxo da Meta: cria o contêiner com o link público do vídeo (a Meta baixa o
+// arquivo), espera o status FINISHED e publica. Precisa da permissão
+// instagram_business_content_publish no login da conta. Limite da Meta: 100
+// posts publicados pela API em 24 h por conta (/content_publishing_limit).
+
+export type ContainerStatus = "IN_PROGRESS" | "FINISHED" | "ERROR" | "EXPIRED" | "PUBLISHED";
+
+export async function createReelContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  input: { videoUrl: string; caption: string; shareToFeed: boolean; coverUrl?: string | null; thumbOffsetMs?: number | null }
+): Promise<{ id: string }> {
+  const body: Record<string, unknown> = {
+    media_type: "REELS",
+    video_url: input.videoUrl,
+    caption: input.caption,
+    share_to_feed: input.shareToFeed,
+  };
+  if (input.coverUrl) body.cover_url = input.coverUrl;
+  if (typeof input.thumbOffsetMs === "number") body.thumb_offset = input.thumbOffsetMs;
+  const response = await fetch(`${instagramGraphBase()}/${instagramAccountId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify(body),
+  });
+  return handleResponse(response);
+}
+
+export async function getContainerStatus(
+  accessToken: string,
+  containerId: string
+): Promise<{ id: string; status_code?: ContainerStatus; status?: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${containerId}?fields=status_code,status`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return handleResponse(response);
+}
+
+export async function publishContainer(
+  accessToken: string,
+  instagramAccountId: string,
+  creationId: string
+): Promise<{ id: string }> {
+  const response = await fetch(`${instagramGraphBase()}/${instagramAccountId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ creation_id: creationId }),
+  });
+  return handleResponse(response);
+}
+
+export async function getMediaPermalink(
+  accessToken: string,
+  mediaId: string
+): Promise<{ id: string; permalink?: string; timestamp?: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${mediaId}?fields=permalink,timestamp`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  return handleResponse(response);
+}
+
+export async function getPublishingLimit(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<{ quota_usage?: number; config?: { quota_total?: number; quota_duration?: number } }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/content_publishing_limit?fields=quota_usage,config`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  const j = await handleResponse<{ data?: { quota_usage?: number; config?: { quota_total?: number; quota_duration?: number } }[] }>(response);
+  return (j.data && j.data[0]) || {};
+}
