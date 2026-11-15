@@ -36,6 +36,15 @@ Toda chamada leva `Authorization: Bearer <chave>`. A chave dá leitura de DMs e 
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/pause` | desliga |
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/activate` | liga, só com `OPENREPLY_AGENT_CAN_ACTIVATE=1` |
 
+| POST | `/api/agent/v1/accounts/:conta/publish` `{videoUrl, caption, shareToFeed?, coverUrl?, thumbOffsetMs?}` | cria o contêiner do Reel (a Meta baixa o vídeo do link https público). Só com `OPENREPLY_AGENT_CAN_PUBLISH=1` |
+| GET | `/api/agent/v1/accounts/:conta/publish/:containerId` | status: `IN_PROGRESS`, `FINISHED`, `ERROR`, `EXPIRED`, `PUBLISHED` |
+| POST | `/api/agent/v1/accounts/:conta/publish/:containerId/go` | publica o contêiner `FINISHED` e devolve `mediaId` e `permalink`. Só com `OPENREPLY_AGENT_CAN_PUBLISH=1` |
+| GET | `/api/agent/v1/accounts/:conta/publish-limit` | posts publicados pela API nas últimas 24 h (limite da Meta) |
+
+### Publicar Reel pelo agente
+
+Precisa da permissão `instagram_business_content_publish` no app da Meta e a conta reconectada depois que ela entrou no login (o pedido de permissão do login já inclui). Quem chama (a Firma) só publica depois do OK do dono no vídeo e na legenda; aqui a trava de servidor é `OPENREPLY_AGENT_CAN_PUBLISH=1`. Legenda até 2.200 letras, 30 hashtags e 20 menções. O contêiner vence em 24 h se não for publicado.
+
 ### Automações pelo agente
 
 Nasce desligada e marcada "Criada pelo agente"; quem liga é o dono no painel, a não ser que `OPENREPLY_AGENT_CAN_ACTIVATE=1`. Só gatilho de comentário em post específico ou no próximo Reel; sem "qualquer palavra", "qualquer post", gatilho de DM/story ou frequência "sempre". Palavra-chave que outra automação ativa já usa no mesmo post volta 409. Apagar não existe aqui.

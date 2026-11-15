@@ -18,6 +18,11 @@ import {
   sendDirectMessage,
   sendPrivateReply,
   setCommentHidden,
+  createReelContainer,
+  getContainerStatus,
+  getMediaPermalink,
+  getPublishingLimit,
+  publishContainer,
   TokenExpiredError,
   type InstagramMedia,
 } from "@/lib/meta/client";
@@ -478,6 +483,64 @@ async function listLogs(query: URLSearchParams) {
   return ok({ logs });
 }
 
+// ── Publicar Reel (15/11) ──
+// A Firma só chama isto depois do OK do Diego no vídeo e na legenda; aqui a
+// trava é de servidor: sem OPENREPLY_AGENT_CAN_PUBLISH=1 nada vai ao ar.
+// Três passos, porque a Meta processa o vídeo antes de deixar publicar:
+// POST /publish (cria o contêiner) → GET /publish/:id (status) → POST /publish/:id/go.
+const publishBody = z.object({
+  videoUrl: z.string().url().max(2000).refine((u) => u.startsWith("https://"), "videoUrl precisa ser https público"),
+  caption: z.string().max(2200).default(""),
+  shareToFeed: z.boolean().default(true),
+  coverUrl: z.string().url().max(2000).nullable().optional(),
+  thumbOffsetMs: z.number().int().min(0).max(900_000).nullable().optional(),
+});
+const CONTAINER_ID = /^[0-9]{5,30}$/;
+
+export function canPublish(env: NodeJS.ProcessEnv = process.env) {
+  return env.OPENREPLY_AGENT_CAN_PUBLISH === "1";
+}
+
+export function captionProblem(caption: string) {
+  const tags = caption.match(/(^|\s)#[\p{L}\p{N}_]+/gu) ?? [];
+  if (tags.length > 30) return "A Meta aceita no máximo 30 hashtags.";
+  const mentions = caption.match(/(^|\s)@[A-Za-z0-9._]+/g) ?? [];
+  if (mentions.length > 20) return "A Meta aceita no máximo 20 menções.";
+  return null;
+}
+
+async function publishStart(account: InstagramAccount, token: string, body: unknown) {
+  if (!canPublish()) return fail(403, "Agente não publica aqui (OPENREPLY_AGENT_CAN_PUBLISH desligado).");
+  const parsed = publishBody.safeParse(body);
+  if (!parsed.success) return fail(400, parsed.error.issues[0]?.message ?? "Corpo inválido.");
+  const problem = captionProblem(parsed.data.caption);
+  if (problem) return fail(400, problem);
+  const c = await createReelContainer(token, account.instagramId, parsed.data);
+  return ok({ account: account.username, containerId: c.id, status: "IN_PROGRESS" });
+}
+
+async function publishStatus(token: string, containerId: string) {
+  if (!CONTAINER_ID.test(containerId)) return fail(400, "containerId inválido.");
+  const s = await getContainerStatus(token, containerId);
+  return ok({ containerId, status: s.status_code ?? "IN_PROGRESS", detail: s.status ?? null });
+}
+
+async function publishGo(account: InstagramAccount, token: string, containerId: string) {
+  if (!canPublish()) return fail(403, "Agente não publica aqui (OPENREPLY_AGENT_CAN_PUBLISH desligado).");
+  if (!CONTAINER_ID.test(containerId)) return fail(400, "containerId inválido.");
+  const s = await getContainerStatus(token, containerId);
+  const status = s.status_code ?? "IN_PROGRESS";
+  if (status !== "FINISHED") return { status: 409, body: { error: `Contêiner não está pronto (${status}).`, status, detail: s.status ?? null } };
+  const m = await publishContainer(token, account.instagramId, containerId);
+  const info = await getMediaPermalink(token, m.id).catch(() => ({ id: m.id, permalink: undefined, timestamp: undefined }));
+  return ok({ account: account.username, mediaId: m.id, permalink: info.permalink ?? null, publishedAt: info.timestamp ?? null });
+}
+
+async function publishLimit(account: InstagramAccount, token: string) {
+  const l = await getPublishingLimit(token, account.instagramId);
+  return ok({ account: account.username, used: l.quota_usage ?? null, total: l.config?.quota_total ?? null, windowSeconds: l.config?.quota_duration ?? null });
+}
+
 export async function handleAgentRequest(req: AgentRequest): Promise<AgentResponse> {
   const { method, path, query, body } = req;
   const [root, accountRef, resource, id, action] = path;
@@ -532,6 +595,8 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
       if (resource === "conversations" && !id) return await listConversations(account, token);
       if (resource === "conversations" && id) return await getThread(account, token, id);
       if (resource === "insights" && !id) return await accountInsights(account, token, query);
+      if (resource === "publish" && id) return await publishStatus(token, decodeURIComponent(id));
+      if (resource === "publish-limit" && !id) return await publishLimit(account, token);
       if (resource === "discovery" && id) {
         return await discoverProfile(account, token, decodeURIComponent(id), query);
       }
@@ -539,6 +604,8 @@ export async function handleAgentRequest(req: AgentRequest): Promise<AgentRespon
 
     if (method === "POST") {
       if (resource === "messages" && !id) return await sendDm(account, token, body);
+      if (resource === "publish" && !id) return await publishStart(account, token, body);
+      if (resource === "publish" && id && action === "go") return await publishGo(account, token, decodeURIComponent(id));
       if (resource === "comments" && id && action) {
         return await commentAction(account, token, id, action, body);
       }
