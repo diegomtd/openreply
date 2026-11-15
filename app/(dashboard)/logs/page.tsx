@@ -262,7 +262,7 @@ export default function LogsPage() {
                       <td colSpan={7} className="px-4 py-4 sm:px-6">
                         <div className="space-y-3">
                           <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                               Comentário
                             </p>
                             <p className="mt-1 text-sm text-foreground">
@@ -272,7 +272,7 @@ export default function LogsPage() {
 
                           {log.errorMessage && (
                             <div>
-                              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                                 O que aconteceu
                               </p>
                               {(() => {
@@ -286,7 +286,7 @@ export default function LogsPage() {
                                       <a
                                         href={friendly.action.href}
                                         onClick={(event) => event.stopPropagation()}
-                                        className="inline-block rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white"
+                                        className="inline-block rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-on-accent"
                                       >
                                         {friendly.action.label}
                                       </a>
@@ -295,7 +295,7 @@ export default function LogsPage() {
                                         menos ajuda a decidir o que fazer, mas e
                                         a que resolve quando alguem precisa
                                         investigar de verdade. */}
-                                    <p className="break-words font-mono text-xs text-zinc-500">
+                                    <p className="break-words font-mono text-xs text-muted">
                                       {log.errorMessage}
                                     </p>
                                   </div>

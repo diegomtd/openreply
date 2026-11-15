@@ -83,7 +83,7 @@ export default function DeadAccountBanner({
 
         <a
           href="/api/instagram/connect"
-          className="shrink-0 rounded-lg bg-error px-4 py-2 text-center text-sm font-medium text-white"
+          className="shrink-0 rounded-lg bg-error px-4 py-2 text-center text-sm font-medium text-background"
         >
           Reconectar agora
         </a>

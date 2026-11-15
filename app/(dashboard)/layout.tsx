@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser } from "@/lib/workspace";
 import { findDeadAccounts } from "@/lib/meta/account-health";
+import { normalizarAparencia } from "@/lib/tema";
 
 export default async function DashboardLayout({
   children,
@@ -26,7 +27,7 @@ export default async function DashboardLayout({
     prisma.instagramAccount.findMany({
       where: { workspaceId: workspace.id },
       orderBy: { connectedAt: "desc" },
-      select: { username: true },
+      select: { id: true, username: true, tokenInvalidAt: true },
     }),
     findDeadAccounts(workspace.id),
   ]);
@@ -34,8 +35,12 @@ export default async function DashboardLayout({
   return (
     <DashboardShell
       workspaceName={workspace.name}
-      instagramUsername={accounts[0]?.username ?? null}
-      instagramAccountCount={accounts.length}
+      aparencia={normalizarAparencia(workspace)}
+      accounts={accounts.map((account) => ({
+        id: account.id,
+        username: account.username,
+        ok: account.tokenInvalidAt === null,
+      }))}
       deadAccounts={deadAccounts.map((account) => ({
         ...account,
         tokenInvalidAt: account.tokenInvalidAt.toISOString(),

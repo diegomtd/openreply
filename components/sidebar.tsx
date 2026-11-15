@@ -98,12 +98,15 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   workspaceName: string;
+  /** Nome da marca (Configurações → Aparência); "Anzol" por padrão. */
+  marca: string;
 }
 
 export default function Sidebar({
   isOpen,
   onClose,
   workspaceName,
+  marca,
 }: SidebarProps) {
   const pathname = usePathname();
 
@@ -119,23 +122,37 @@ export default function Sidebar({
 
       <aside
         className={`
-          fixed top-0 left-0 z-50 h-dvh w-64 max-w-[85vw] shrink-0 bg-surface border-r border-border flex flex-col
+          fixed top-0 left-0 z-50 h-dvh w-64 max-w-[85vw] shrink-0 bg-surface/80 backdrop-blur-xl border-r border-border flex flex-col
           transition-transform duration-200 ease-out
           lg:h-full lg:translate-x-0 lg:static lg:z-auto
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
         `}
       >
-        <div className="px-6 py-5 border-b border-border">
-          <Link href="/dashboard" className="text-base font-semibold">
-            Anzol
+        <div className="px-5 pt-5">
+          <Link href="/dashboard" className="flex items-center gap-3">
+            {/* Marca: um anzol desenhado num círculo na cor de destaque. */}
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent-soft text-accent ring-1 ring-inset ring-accent/25">
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="14" cy="4" r="1.6" />
+                <path d="M14 5.6v8a4.5 4.5 0 1 1-9 0V11l2.5 2" />
+                
+              </svg>
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-base font-semibold tracking-tight">
+                {marca}
+              </span>
+              <span className="rotulo block !text-[10px]">Instagram · DM</span>
+            </span>
           </Link>
+          <div className="linha-horizonte mt-5 opacity-60" />
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
           {navGroups.map((group, index) => (
             <div key={group.heading ?? `grupo-${index}`} className="space-y-1">
               {group.heading && (
-                <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted">
+                <p className="rotulo px-3 pb-1.5">
                   {group.heading}
                 </p>
               )}
@@ -154,10 +171,10 @@ export default function Sidebar({
                     title={item.hint}
                     aria-current={isActive ? "page" : undefined}
                     className={`
-                      flex items-center gap-3 px-3 py-2.5 rounded text-sm
+                      relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors
                       ${
                         isActive
-                          ? "bg-surface-hover text-foreground font-medium"
+                          ? "bg-accent-soft text-foreground font-medium before:absolute before:left-0 before:top-2 before:bottom-2 before:w-[3px] before:rounded-full before:bg-accent"
                           : "text-muted hover:text-foreground hover:bg-surface-hover"
                       }
                     `}
@@ -184,9 +201,12 @@ export default function Sidebar({
           ))}
         </nav>
 
-        <div className="px-5 py-4 border-t border-border">
+        <div className="mx-3 mb-3 rounded-xl border border-border bg-background/40 px-4 py-3">
           <p className="text-sm text-foreground truncate">{workspaceName}</p>
-          <p className="text-xs text-muted">No seu servidor</p>
+          <p className="mt-0.5 flex items-center gap-2 text-xs text-muted">
+            <span className="luz text-success" style={{ width: 6, height: 6 }} />
+            No seu servidor
+          </p>
         </div>
       </aside>
     </>

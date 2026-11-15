@@ -1,0 +1,115 @@
+/* tema.css — design system do Anzol, irmão do "Horizonte" da Firma
+   (a-firma apps/painel-maestro/tokens.css): luz é estado, profundidade é
+   prioridade, sem neon. ÚNICO arquivo com cor literal do painel.
+
+   Três camadas, todas trocáveis sem tocar em código:
+   1. data-tema  = auto | escuro | claro     (modo)
+   2. data-acento = gelo | ambar | oceano | menta | coral | violeta
+   3. o resto (superfícies, texto, estados) deriva do modo.
+   O workspace guarda a escolha (Configurações → Aparência). */
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+/* ── Acentos: cada um traz a versão para fundo escuro e para fundo claro ── */
+:root,
+[data-acento="gelo"] {
+  --ac-escuro: #bfd3ff; --ac-escuro-tx: #0b1530;
+  --ac-claro: #284e9a;  --ac-claro-tx: #ffffff;
+}
+[data-acento="ambar"] {
+  --ac-escuro: #ffb36b; --ac-escuro-tx: #2a1606;
+  --ac-claro: #9a4e0c;  --ac-claro-tx: #ffffff;
+}
+[data-acento="oceano"] {
+  --ac-escuro: #7fd6e0; --ac-escuro-tx: #062126;
+  --ac-claro: #0f6b78;  --ac-claro-tx: #ffffff;
+}
+[data-acento="menta"] {
+  --ac-escuro: #7fe0b0; --ac-escuro-tx: #06261a;
+  --ac-claro: #1c6e49;  --ac-claro-tx: #ffffff;
+}
+[data-acento="coral"] {
+  --ac-escuro: #ff9a8a; --ac-escuro-tx: #2e0d08;
+  --ac-claro: #b23a2e;  --ac-claro-tx: #ffffff;
+}
+[data-acento="violeta"] {
+  --ac-escuro: #c9b5ff; --ac-escuro-tx: #1b1238;
+  --ac-claro: #5b3fb0;  --ac-claro-tx: #ffffff;
+}
+
+/* ── Modo escuro (padrão, o Horizonte original) ── */
+:root,
+[data-tema="escuro"],
+[data-tema="auto"] {
+  color-scheme: dark;
+  --bg-0: #07090d; --bg-1: #0d1118; --bg-2: #141a26;
+  --linha: #1c2433; --linha-forte: #2a3448;
+  --tx-1: #eceff5; --tx-2: #a3acbd;
+  --ok: #7fe0b0; --alerta: #ffb36b; --erro: #ff8a8a;
+  --acento: var(--ac-escuro); --acento-tx: var(--ac-escuro-tx);
+  --acento-mistura: #ffffff;
+  --vidro: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012));
+  --vidro-brilho: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --sombra-funda: 0 30px 60px -34px rgba(0, 0, 0, 0.9);
+  --horizonte-luz: rgba(120, 150, 230, 0.14);
+  --veu: rgba(3, 4, 7, 0.72);
+}
+
+/* ── Modo claro (mesmos papéis, contraste AA) ── */
+[data-tema="claro"] {
+  color-scheme: light;
+  --bg-0: #f3f5fa; --bg-1: #ffffff; --bg-2: #e9edf5;
+  --linha: #d3dae6; --linha-forte: #b7c2d5;
+  --tx-1: #182334; --tx-2: #4a5a72;
+  --ok: #1c6e49; --alerta: #8b470b; --erro: #a43236;
+  --acento: var(--ac-claro); --acento-tx: var(--ac-claro-tx);
+  --acento-mistura: #000000;
+  --vidro: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
+  --vidro-brilho: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --sombra-funda: 0 18px 38px -32px rgba(20, 35, 60, 0.3);
+  --horizonte-luz: rgba(120, 150, 230, 0.16);
+  --veu: rgba(18, 28, 48, 0.35);
+}
+@media (prefers-color-scheme: light) {
+  [data-tema="auto"] {
+    color-scheme: light;
+    --bg-0: #f3f5fa; --bg-1: #ffffff; --bg-2: #e9edf5;
+    --linha: #d3dae6; --linha-forte: #b7c2d5;
+    --tx-1: #182334; --tx-2: #4a5a72;
+    --ok: #1c6e49; --alerta: #8b470b; --erro: #a43236;
+    --acento: var(--ac-claro); --acento-tx: var(--ac-claro-tx);
+    --acento-mistura: #000000;
+    --vidro: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
+    --vidro-brilho: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    --sombra-funda: 0 18px 38px -32px rgba(20, 35, 60, 0.3);
+    --horizonte-luz: rgba(120, 150, 230, 0.16);
+    --veu: rgba(18, 28, 48, 0.35);
+  }
+}
+
+/* Derivados: nenhum tom novo, só mistura dos de cima. */
+:root,
+[data-tema],
+[data-acento] {
+  --acento-hover: color-mix(in oklab, var(--acento) 86%, var(--acento-mistura));
+  --acento-suave: color-mix(in oklab, var(--acento) 14%, transparent);
+  --linha-horizonte: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklab, var(--acento) 45%, transparent) 46%,
+    var(--acento) 50%,
+    color-mix(in oklab, var(--acento) 45%, transparent) 54%,
+    transparent
+  );
+}

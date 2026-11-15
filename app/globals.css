@@ -1,38 +1,40 @@
 @import "tailwindcss";
 
-/* ManyChat Alternative — Design System
-   Plain and functional. No gradients, glass, glow, or animation. */
+@import "./tema.css";
+
+/* Anzol — design system "Horizonte" (ver app/tema.css). As cores do Tailwind
+   apontam para variáveis, então trocar tema/acento repinta tudo sem rebuild. */
 
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #18181b;
-  --color-surface: #f7f7f8;
-  --color-surface-hover: #efeff1;
-  --color-border: #e4e4e7;
-  --color-border-hover: #d4d4d8;
-  --color-muted: #71717a;
-  --color-accent: #f97316;
-  --color-accent-hover: #ea580c;
-  --color-success: #16a34a;
-  --color-error: #dc2626;
-  --color-warning: #d97706;
-  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --color-background: var(--bg-0);
+  --color-foreground: var(--tx-1);
+  --color-surface: var(--bg-1);
+  --color-surface-hover: var(--bg-2);
+  --color-border: var(--linha);
+  --color-border-hover: var(--linha-forte);
+  --color-muted: var(--tx-2);
+  --color-accent: var(--acento);
+  --color-accent-hover: var(--acento-hover);
+  --color-accent-soft: var(--acento-suave);
+  --color-on-accent: var(--acento-tx);
+  --color-success: var(--ok);
+  --color-error: var(--erro);
+  --color-warning: var(--alerta);
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 0.5rem;
 }
 
-html {
-  color-scheme: light;
-}
 
 body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+  background: var(--bg-0);
+  color: var(--tx-1);
   font-family: var(--font-sans);
 }
 
 /* Focus ring — visible, for keyboard users. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--acento);
   outline-offset: 2px;
 }
 
@@ -55,18 +57,53 @@ select:focus-visible {
   }
 }
 
-/* Panel — flat container. Replaces .glass / .glass-strong. */
+/* Painel — vidro discreto do Horizonte: profundidade sem brilho de HUD. */
 .panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--vidro), var(--bg-1);
+  border: 1px solid var(--linha);
+  box-shadow: var(--vidro-brilho), var(--sombra-funda);
+  border-radius: 14px;
+}
+
+/* Fundo das telas: a luz do horizonte nasce embaixo, bem fraca. */
+.horizonte-fundo {
+  background:
+    radial-gradient(1200px 520px at 50% 118%, var(--horizonte-luz), transparent 70%),
+    radial-gradient(900px 420px at 85% -12%, var(--horizonte-luz), transparent 70%),
+    var(--bg-0);
+}
+
+/* A linha do horizonte: um fio de luz na cor de destaque. */
+.linha-horizonte {
+  height: 1px;
+  background: var(--linha-horizonte);
+}
+
+/* Rótulo técnico (mono, caixa alta, espaçado), como na Firma. */
+.rotulo {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--tx-2);
+}
+
+/* Luz de estado: verde rodando, âmbar esperando, vermelho parado. */
+.luz {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 18%, transparent);
 }
 
 /* Kept as no-op aliases so existing markup degrades to plain surfaces
    instead of breaking. Prefer .panel in new code. */
 .glass,
 .glass-strong {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--bg-1);
+  border: 1px solid var(--linha);
 }
 
 .gradient-mesh {

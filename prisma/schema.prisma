@@ -88,6 +88,12 @@ model Workspace {
   /// Merged with the built-in list (stop / parar / sair / cancelar / …).
   optOutKeywords       String[] @default([])
 
+  /// Aparência do painel (ver lib/tema.ts): modo auto|escuro|claro, cor de
+  /// destaque e o nome mostrado no lugar de "Anzol" — para revenda.
+  uiTema   String  @default("auto")
+  uiAcento String  @default("gelo")
+  uiMarca  String?
+
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]

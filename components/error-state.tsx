@@ -26,7 +26,7 @@ export default function ErrorState({
         {friendly.action && (
           <a
             href={friendly.action.href}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent"
           >
             {friendly.action.label}
           </a>

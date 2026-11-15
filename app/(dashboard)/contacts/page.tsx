@@ -249,7 +249,7 @@ export default function ContactsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por @ ou id"
-            className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none sm:w-56"
+            className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none sm:w-56"
           />
           {accounts.length > 1 && (
             <AccountSelect
@@ -338,7 +338,7 @@ export default function ContactsPage() {
                       </td>
                       <td className="px-4 py-4 sm:px-6">
                         {contact.tags.length === 0 ? (
-                          <span className="text-zinc-500">—</span>
+                          <span className="text-muted">—</span>
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {contact.tags.map((tag) => (
@@ -372,7 +372,7 @@ export default function ContactsPage() {
                           return (
                             <span
                               className={`block text-xs ${
-                                state.open ? "text-emerald-400" : "text-zinc-500"
+                                state.open ? "text-success" : "text-muted"
                               }`}
                             >
                               {state.text}
@@ -470,7 +470,7 @@ export default function ContactsPage() {
                                 placeholder="nova tag + Enter"
                                 maxLength={40}
                                 disabled={pendingTags === contact.id}
-                                className="w-40 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none disabled:opacity-40"
+                                className="w-40 rounded-md border border-border bg-surface px-2 py-0.5 text-xs text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none disabled:opacity-40"
                               />
                             </div>
                             <p className="text-xs text-muted">
