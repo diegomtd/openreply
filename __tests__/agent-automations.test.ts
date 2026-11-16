@@ -43,6 +43,18 @@ describe("automações pela API de agentes", () => {
     expect(data.trackedLinks.create[0].destinationUrl).toBe("https://firmahq.oceanoazul.tech/");
   });
 
+  it("botões extras: App Store + navegador, em ordem, no máximo 3 no total", async () => {
+    const corpo = { ...valido, linkUrl: "https://apps.apple.com/br/app/x/id1", linkButtonLabel: "Baixar no iPhone", extraLinks: [{ url: "https://maemind.com/", label: "Usar no navegador" }] };
+    expect((await req("POST", "accounts/acc1/automations", corpo)).status).toBe(201);
+    const links = mockPrisma.automation.create.mock.calls[0][0].data.trackedLinks.create;
+    expect(links.map((l: { destinationUrl: string }) => l.destinationUrl)).toEqual(["https://apps.apple.com/br/app/x/id1", "https://maemind.com/"]);
+    expect(links[1].label).toBe("Usar no navegador");
+    expect(links[1].createdAt.getTime()).toBeGreaterThan(links[0].createdAt.getTime());
+    expect((await req("POST", "accounts/acc1/automations", { ...corpo, extraLinks: [1, 2, 3].map(() => corpo.extraLinks[0]) })).status).toBe(400);
+    const { linkUrl: _sem, ...semLink } = corpo;
+    expect((await req("POST", "accounts/acc1/automations", semLink)).status).toBe(400);
+  });
+
   it("recusa qualquer-palavra, frequência sempre e post + próximo Reel juntos", async () => {
     expect((await req("POST", "accounts/acc1/automations", { ...valido, keywords: [] })).status).toBe(400);
     expect((await req("POST", "accounts/acc1/automations", { ...valido, sendFrequency: "ALWAYS" })).status).toBe(400);

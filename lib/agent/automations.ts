@@ -37,6 +37,12 @@ export const createBody = z
     dmMessage: z.string().trim().min(1).max(1000),
     linkUrl: z.string().url().max(2000).optional().nullable(),
     linkButtonLabel: z.string().trim().max(20).optional().nullable(),
+    /** Botões extras na DM (ex.: App Store + navegador). A Meta aceita até 3 botões no total. */
+    extraLinks: z
+      .array(z.object({ url: z.string().url().max(2000), label: z.string().trim().min(1).max(20) }))
+      .max(2)
+      .optional()
+      .default([]),
     publicReplies: z.array(z.string().trim().min(1).max(300)).max(10).optional().default([]),
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().trim().max(1000).optional().nullable(),
@@ -59,6 +65,9 @@ export const createBody = z
   })
   .refine((d) => d.steps.reduce((t, s) => t + s.delayMinutes, 0) <= 1440, {
     message: "A soma dos atrasos do funil passa de 24h (janela de mensagens do Instagram).",
+  })
+  .refine((d) => !d.extraLinks.length || Boolean(d.linkUrl), {
+    message: "extraLinks precisa de linkUrl (o primeiro botão).",
   })
   .refine((d) => Boolean(d.postId) !== d.pendingNextReel, {
     message: "Informe postId OU pendingNextReel=true (um dos dois).",
@@ -138,6 +147,7 @@ export async function createAutomation(account: InstagramAccount, body: unknown)
   const conflicts = keywordConflicts(d.keywords, postId, active);
   if (conflicts.length) return fail(409, `Palavra-chave em uso: ${conflicts.join("; ")}.`);
 
+  const base = Date.now();
   const created = await prisma.automation.create({
     data: {
       workspaceId: account.workspaceId,
@@ -169,7 +179,17 @@ export async function createAutomation(account: InstagramAccount, body: unknown)
       ...(d.linkUrl
         ? {
             trackedLinks: {
-              create: [{ workspaceId: account.workspaceId, slug: generateTrackedLinkSlug(), label: "Primary campaign link", destinationUrl: d.linkUrl }],
+              // createdAt explícito: o worker ordena os botões por createdAt (o 1º usa linkButtonLabel).
+              create: [
+                { url: d.linkUrl, label: "Primary campaign link" },
+                ...d.extraLinks,
+              ].map((l, i) => ({
+                workspaceId: account.workspaceId,
+                slug: generateTrackedLinkSlug(),
+                label: l.label,
+                destinationUrl: l.url,
+                createdAt: new Date(base + i),
+              })),
             },
           }
         : {}),
