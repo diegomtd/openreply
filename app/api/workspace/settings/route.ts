@@ -7,10 +7,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
+import { ACENTO_IDS, MODOS } from "@/lib/tema";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
 } from "@/lib/workspace-access";
+
+const SETTINGS_SELECT = {
+  contactCooldownHours: true,
+  optOutKeywords: true,
+  uiTema: true,
+  uiAcento: true,
+  uiMarca: true,
+} as const;
 
 export async function GET() {
   const context = await getCurrentWorkspaceContext();
@@ -23,7 +32,7 @@ export async function GET() {
 
   const workspace = await prisma.workspace.findUnique({
     where: { id: context.workspaceId },
-    select: { contactCooldownHours: true, optOutKeywords: true },
+    select: SETTINGS_SELECT,
   });
 
   if (!workspace) {
@@ -44,6 +53,10 @@ const patchSchema = z.object({
     .array(z.string().trim().min(1).max(40))
     .max(20)
     .optional(),
+  // Aparência (Configurações → Aparência). Marca vazia volta para "Anzol".
+  uiTema: z.enum(MODOS).optional(),
+  uiAcento: z.enum(ACENTO_IDS).optional(),
+  uiMarca: z.string().trim().max(32).nullable().optional(),
 });
 
 export async function PATCH(request: NextRequest) {
@@ -99,8 +112,15 @@ export async function PATCH(request: NextRequest) {
             ),
           }
         : {}),
+      ...(parsed.data.uiTema !== undefined ? { uiTema: parsed.data.uiTema } : {}),
+      ...(parsed.data.uiAcento !== undefined
+        ? { uiAcento: parsed.data.uiAcento }
+        : {}),
+      ...(parsed.data.uiMarca !== undefined
+        ? { uiMarca: parsed.data.uiMarca || null }
+        : {}),
     },
-    select: { contactCooldownHours: true, optOutKeywords: true },
+    select: SETTINGS_SELECT,
   });
 
   return NextResponse.json({ success: true, data: workspace });

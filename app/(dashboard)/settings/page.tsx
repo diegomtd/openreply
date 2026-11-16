@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
+import AparenciaForm from "@/components/aparencia-form";
+import { Avatar } from "@/components/top-bar";
 
 interface SettingsData {
   workspace: {
@@ -261,7 +263,7 @@ export default function SettingsPage() {
   }
 
   if (loading) {
-    return <div className="panel rounded p-8 h-64" />;
+    return <div className="panel h-64 p-8 animate-pulse" />;
   }
 
   const accounts = data?.instagramAccounts ?? [];
@@ -278,96 +280,102 @@ export default function SettingsPage() {
         <InstagramConnectNotice />
       </Suspense>
 
-      <section className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-6">Conexão com o Instagram</h2>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 py-3 border-b border-border">
-            <div>
-              <p className="text-sm font-medium text-foreground">Status</p>
-              <p className="text-xs text-muted mt-0.5">
-                Os webhooks de comentário e as respostas privadas dependem
-                desta conexão.
-              </p>
-            </div>
-            <span
-              className={`px-3 py-1.5 rounded-full text-xs font-medium ${
-                accounts.length > 0
-                  ? "bg-success/10 text-success"
-                  : "bg-warning/10 text-warning"
-              }`}
-            >
-              {accounts.length > 0 ? "Conectado" : "Sem conexão"}
-            </span>
+      <section id="contas" className="panel scroll-mt-24 p-4 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="rotulo">Instagram</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">
+              Contas conectadas
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              Os webhooks de comentário e as respostas privadas dependem
+              desta conexão.
+            </p>
           </div>
-
-          <div className="flex items-center justify-between gap-3 py-3 border-b border-border">
-            <div>
-              <p className="text-sm font-medium text-foreground">Contas</p>
-              <p className="text-xs text-muted mt-0.5">
-                {accounts.length}{" "}
-                {accounts.length === 1
-                  ? "perfil do Instagram conectado"
-                  : "perfis do Instagram conectados"}
-              </p>
-            </div>
-            <span className="text-sm text-muted">
-              {accounts.length > 0 ? `${accounts.length} conectada(s)` : "Nenhuma"}
-            </span>
-          </div>
-
-          <div className="space-y-3 py-3">
-            {accounts.length === 0 && (
-              <p className="text-sm text-muted">
-                Conecte uma conta profissional do Instagram para criar
-                automações.
-              </p>
-            )}
-            {accounts.map((account) => (
-              <div
-                key={account.id}
-                className="flex flex-col gap-3 rounded border border-border bg-surface/70 p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    @{account.username}
-                  </p>
-                  <p className="mt-1 text-xs text-muted">
-                    Token expira em{" "}
-                    {account.tokenExpiresAt
-                      ? new Date(account.tokenExpiresAt).toLocaleDateString("pt-BR")
-                      : "data indisponível"}{" "}
-                    ·{" "}
-                    {account.webhookSubscribed
-                      ? "webhook ativo"
-                      : "webhook pendente"}
-                  </p>
-                </div>
-                <button
-                  onClick={() => disconnectInstagram(account.id)}
-                  disabled={busy === `disconnect:${account.id}`}
-                  className="inline-flex items-center justify-center rounded border border-error/20 px-4 py-2 text-sm font-medium text-error transition-all hover:border-error/40 hover:bg-error/10 disabled:opacity-50"
-                >
-                  {busy === `disconnect:${account.id}`
-                    ? "Desconectando…"
-                    : "Desconectar"}
-                </button>
-              </div>
-            ))}
-          </div>
+          <span
+            className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
+              accounts.length > 0
+                ? "bg-success/10 text-success"
+                : "bg-warning/10 text-warning"
+            }`}
+          >
+            <span className="luz" style={{ width: 6, height: 6 }} />
+            {accounts.length > 0
+              ? `${accounts.length} ${accounts.length === 1 ? "conectada" : "conectadas"}`
+              : "Sem conexão"}
+          </span>
         </div>
 
-        <div className="mt-6 pt-4 border-t border-border flex gap-3">
+        <div className="mt-6 grid gap-3">
+          {accounts.length === 0 && (
+            <p className="rounded-xl border border-dashed border-border-hover p-6 text-center text-sm text-muted">
+              Conecte uma conta profissional do Instagram para criar
+              automações.
+            </p>
+          )}
+          {accounts.map((account) => (
+            <div
+              key={account.id}
+              className="flex flex-col gap-4 rounded-xl border border-border bg-background/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar username={account.username} ok size="md" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">
+                    @{account.username}
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                    <span className="rounded-full border border-border px-2 py-0.5 font-mono text-muted">
+                      token até{" "}
+                      {account.tokenExpiresAt
+                        ? new Date(account.tokenExpiresAt).toLocaleDateString("pt-BR")
+                        : "—"}
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 font-mono ${
+                        account.webhookSubscribed ? "text-success" : "text-warning"
+                      }`}
+                    >
+                      <span className="luz" style={{ width: 5, height: 5 }} />
+                      {account.webhookSubscribed ? "webhook ativo" : "webhook pendente"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => disconnectInstagram(account.id)}
+                disabled={busy === `disconnect:${account.id}`}
+                className="inline-flex items-center justify-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-error/40 hover:bg-error/10 hover:text-error disabled:opacity-50"
+              >
+                {busy === `disconnect:${account.id}`
+                  ? "Desconectando…"
+                  : "Desconectar"}
+              </button>
+            </div>
+          ))}
+
           <a
             href="/api/instagram/connect"
-            className="px-4 py-2 rounded text-sm font-medium transition-colors bg-accent text-white hover:bg-accent-hover"
+            className="group flex items-center gap-3 rounded-xl border border-dashed border-border-hover p-4 text-sm transition-colors hover:border-accent/50 hover:bg-accent-soft"
           >
-            {accounts.length > 0 ? "Conectar outra conta" : "Conectar Instagram"}
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-accent text-lg font-light text-on-accent">
+              +
+            </span>
+            <span>
+              <span className="block font-medium text-foreground">
+                {accounts.length > 0 ? "Conectar outra conta" : "Conectar Instagram"}
+              </span>
+              <span className="block text-xs text-muted">
+                Login oficial do Instagram, conta profissional
+              </span>
+            </span>
           </a>
         </div>
       </section>
 
-      <section className="panel rounded p-4 sm:p-6">
+      <AparenciaForm podeEditar={canManageMembers} />
+
+      <section className="panel p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">Time</h2>
         <div className="space-y-3">
           {membersData?.members.map((member) => (
@@ -390,7 +398,7 @@ export default function SettingsPage() {
 
         {membersData?.invitations.length ? (
           <div className="mt-6 border-t border-border pt-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
               Convites pendentes
             </p>
             <div className="space-y-3">
@@ -458,7 +466,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={busy === "invite"}
-              className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+              className="rounded bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
               {busy === "invite" ? "Convidando…" : "Convidar"}
             </button>
@@ -551,7 +559,7 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <section className="panel rounded p-4 sm:p-6">
+      <section className="panel p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-2">Sua senha</h2>
         <p className="mb-6 text-xs text-muted">
           Opcional — sem senha cadastrada, o login continua pelo link por
@@ -573,7 +581,7 @@ export default function SettingsPage() {
               onChange={(event) => setCurrentPassword(event.target.value)}
               placeholder="Deixe em branco se ainda não tem senha"
               autoComplete="current-password"
-              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none"
             />
           </div>
           <div>
@@ -591,13 +599,13 @@ export default function SettingsPage() {
               placeholder="Pelo menos 8 caracteres"
               autoComplete="new-password"
               required
-              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none"
             />
           </div>
           <button
             type="submit"
             disabled={busy === "password"}
-            className="rounded bg-accent px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+            className="rounded bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
             {busy === "password" ? "Salvando…" : "Salvar senha"}
           </button>
@@ -608,7 +616,7 @@ export default function SettingsPage() {
         </form>
       </section>
 
-      <section className="panel rounded p-4 sm:p-6">
+      <section className="panel p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-2">Regras de automação</h2>
         <p className="mb-6 text-xs text-muted">
           Valem por cima da frequência configurada em cada automação.
@@ -654,7 +662,7 @@ export default function SettingsPage() {
               value={optOutDraft}
               onChange={(e) => setOptOutDraft(e.target.value)}
               placeholder="me tira, não quero mais"
-              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              className="mt-2 w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none"
             />
             <p className="mt-1.5 text-xs text-muted">
               Separadas por vírgula. Um DM que seja só uma dessas palavras
@@ -670,7 +678,7 @@ export default function SettingsPage() {
             <button
               type="submit"
               disabled={busy === "rules" || !rules}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-40"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-40"
             >
               {busy === "rules" ? "Salvando…" : "Salvar regras"}
             </button>
@@ -679,7 +687,7 @@ export default function SettingsPage() {
         </form>
       </section>
 
-      <section className="panel rounded p-4 sm:p-6">
+      <section className="panel p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">Uso</h2>
         <div className="flex items-center justify-between gap-3 py-3">
           <div>

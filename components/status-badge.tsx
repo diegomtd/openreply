@@ -1,5 +1,5 @@
 /**
- * Rótulo do status de um envio. Texto puro; a cor carrega o estado.
+ * Rótulo do status de um envio: luz + texto; a cor carrega o estado.
  */
 
 const statusConfig: Record<string, { text: string; label: string }> = {
@@ -24,7 +24,10 @@ export default function StatusBadge({ status }: StatusBadgeProps) {
   const config = statusConfig[status] ?? statusConfig.PENDING;
 
   return (
-    <span className={`shrink-0 whitespace-nowrap text-sm ${config.text}`}>
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium ${config.text}`}
+    >
+      <span className="luz" style={{ width: 6, height: 6 }} aria-hidden="true" />
       {config.label}
     </span>
   );

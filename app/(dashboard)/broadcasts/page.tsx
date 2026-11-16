@@ -296,7 +296,7 @@ export default function BroadcastsPage() {
               includeAll={false}
             />
             <label className="flex flex-1 flex-col gap-2 text-sm">
-              <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">
                 Nome do envio
               </span>
               <input
@@ -304,13 +304,13 @@ export default function BroadcastsPage() {
                 onChange={(event) => setName(event.target.value)}
                 placeholder="Ex.: lote novo de setembro"
                 maxLength={80}
-                className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 outline-none transition-colors focus:border-accent/40"
+                className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 outline-none transition-colors focus:border-accent/40"
               />
             </label>
           </div>
 
           <label className="flex flex-col gap-2 text-sm">
-            <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
               Mensagem
             </span>
             <textarea
@@ -319,7 +319,7 @@ export default function BroadcastsPage() {
               rows={5}
               maxLength={900}
               placeholder="Oi {username}, tudo bem? ..."
-              className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 outline-none transition-colors focus:border-accent/40"
+              className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 outline-none transition-colors focus:border-accent/40"
             />
             <span className="text-xs text-muted">
               <code className="text-foreground">{"{username}"}</code> vira o nome
@@ -330,7 +330,7 @@ export default function BroadcastsPage() {
           </label>
 
           <div className="space-y-4 border-t border-border pt-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">
               Para quem
             </p>
 
@@ -341,7 +341,7 @@ export default function BroadcastsPage() {
                   value={tagsInput}
                   onChange={(event) => setTagsInput(event.target.value)}
                   placeholder="cliente, vip"
-                  className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 outline-none transition-colors focus:border-accent/40"
+                  className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 outline-none transition-colors focus:border-accent/40"
                 />
               </label>
               <label className="flex flex-col gap-2 text-sm">
@@ -350,7 +350,7 @@ export default function BroadcastsPage() {
                   value={excludedInput}
                   onChange={(event) => setExcludedInput(event.target.value)}
                   placeholder="ja_comprou"
-                  className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 outline-none transition-colors focus:border-accent/40"
+                  className="rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted/70 outline-none transition-colors focus:border-accent/40"
                 />
               </label>
             </div>
@@ -375,12 +375,12 @@ export default function BroadcastsPage() {
           </div>
 
           {error && (
-            <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+            <p className="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">
               {error}
             </p>
           )}
           {result && (
-            <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
+            <p className="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
               {result}
             </p>
           )}
@@ -398,7 +398,7 @@ export default function BroadcastsPage() {
                 <button
                   onClick={send}
                   disabled={sending}
-                  className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-50"
                 >
                   {sending ? "Enviando…" : "Confirmar envio"}
                 </button>
@@ -421,7 +421,7 @@ export default function BroadcastsPage() {
                 );
               }}
               disabled={!canSend}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-50"
             >
               Revisar envio
             </button>
@@ -430,7 +430,7 @@ export default function BroadcastsPage() {
 
         {/* ── Audiência ─────────────────────────────────────────────────── */}
         <div className="panel space-y-4 rounded p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">
             Audiência {previewing && <span className="text-muted">calculando…</span>}
           </p>
 
@@ -442,7 +442,7 @@ export default function BroadcastsPage() {
           </div>
 
           {preview && preview.expiringSoon > 0 && (
-            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
+            <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
               <strong>{preview.expiringSoon}</strong>{" "}
               {preview.expiringSoon === 1 ? "sai" : "saem"} da janela nas
               próximas {preview.expiringSoonHours}h.

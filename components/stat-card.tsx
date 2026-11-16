@@ -36,9 +36,9 @@ export default function StatCard({
 
   const body = (
     <>
-      <p className="text-sm text-muted">{label}</p>
+      <p className="rotulo leading-relaxed">{label}</p>
       <p
-        className={`mt-1 text-2xl font-semibold ${
+        className={`mt-3 text-3xl font-semibold tracking-tight tabular-nums ${
           alert ? "text-error" : "text-foreground"
         }`}
       >
@@ -53,7 +53,7 @@ export default function StatCard({
     </>
   );
 
-  const shell = `panel rounded p-4 ${
+  const shell = `panel p-4 sm:p-5 ${
     alert ? "border-error/30 bg-error/5" : ""
   }`;
 
@@ -62,7 +62,7 @@ export default function StatCard({
   return (
     <Link
       href={href}
-      className={`${shell} block transition-colors hover:border-border-hover hover:bg-surface-hover`}
+      className={`${shell} block transition-colors hover:border-accent/40`}
     >
       {body}
     </Link>

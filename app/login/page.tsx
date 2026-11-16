@@ -60,10 +60,16 @@ export default async function LoginPage({
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6">
+    <div className="horizonte-fundo min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-foreground">
+          <span className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent ring-1 ring-inset ring-accent/25">
+            <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="14" cy="4" r="1.6" />
+                <path d="M14 5.6v8a4.5 4.5 0 1 1-9 0V11l2.5 2" />
+            </svg>
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Anzol
           </h1>
           <p className="text-muted text-sm leading-relaxed mt-2">
@@ -73,7 +79,7 @@ export default async function LoginPage({
           </p>
         </div>
 
-        <div className="panel rounded p-8 shadow-black/40">
+        <div className="panel p-8">
           {selectedTemplate && !checkEmail && (
             <div className="mb-5 border border-accent/20 bg-accent/10 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-accent">
@@ -116,7 +122,7 @@ export default async function LoginPage({
                     required
                     autoComplete="email"
                     placeholder="voce@email.com"
-                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none transition-colors"
+                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none transition-colors"
                   />
                 </div>
                 <div className="space-y-2">
@@ -133,12 +139,12 @@ export default async function LoginPage({
                     required
                     autoComplete="current-password"
                     placeholder="••••••••"
-                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none transition-colors"
+                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none transition-colors"
                   />
                 </div>
                 <button
                   type="submit"
-                  className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-indigo-500/25 transition-all hover:shadow-indigo-500/30"
+                  className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-on-accent transition-all"
                 >
                   Entrar
                 </button>
@@ -171,13 +177,13 @@ export default async function LoginPage({
                     required
                     autoComplete="email"
                     placeholder="voce@email.com"
-                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none transition-colors"
+                    className="w-full px-4 py-3 rounded bg-surface border border-border text-sm text-foreground placeholder:text-muted/70 focus:border-accent/40 focus:outline-none transition-colors"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-indigo-500/25 transition-all hover:shadow-indigo-500/30"
+                  className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-on-accent transition-all"
                 >
                   Me manda o link de acesso
                 </button>

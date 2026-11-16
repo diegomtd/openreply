@@ -116,10 +116,20 @@ export default function DashboardPage() {
       {/* Greeting header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
-            Olá{stats?.userName ? `, ${stats.userName}` : ""}!
+          <p className="rotulo flex items-center gap-2">
+            <span
+              className={`luz ${
+                (stats?.dmsFailedMonth ?? 0) > 0 ? "text-warning" : "text-success"
+              }`}
+            />
+            {(stats?.dmsFailedMonth ?? 0) > 0
+              ? "Rodando, com falhas para ver"
+              : "Tudo rodando"}
+          </p>
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Olá{stats?.userName ? `, ${stats.userName}` : ""}.
           </h1>
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-2 text-sm text-muted">
             {connectedCount} {connectedCount === 1 ? "conta conectada" : "contas conectadas"}
             {" · "}
             {stats?.contactsCount ?? 0}{" "}
@@ -187,19 +197,24 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 sm:gap-6">
         {/* 7-Day Chart */}
         <div className="lg:col-span-3 panel rounded p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-foreground mb-6">
-            DMs nos últimos 7 dias
-          </h2>
+          <div className="mb-6 flex items-baseline justify-between gap-3">
+            <h2 className="rotulo">DMs nos últimos 7 dias</h2>
+            <span className="font-mono text-xs text-muted tabular-nums">
+              {stats?.dmsSentWeek ?? 0} na semana
+            </span>
+          </div>
           <div className="flex items-end gap-1.5 h-40 sm:gap-2">
             {stats?.dailyDMs.map((day) => (
-              <div key={day.date} className="min-w-0 flex-1 flex flex-col items-center gap-2">
-                <span className="text-xs text-muted font-medium">{day.count}</span>
-                <div
-                  className="w-full rounded-sm bg-accent min-h-[4px]"
-                  style={{ height: `${Math.max((day.count / maxDM) * 100, 4)}%` }}
-                />
+              <div key={day.date} className="min-w-0 flex-1 h-full flex flex-col items-center gap-2">
+                <span className="font-mono text-xs text-muted tabular-nums">{day.count}</span>
+                <div className="flex w-full flex-1 items-end">
+                  <div
+                    className="w-full rounded-md bg-gradient-to-t from-accent/25 to-accent min-h-[4px]"
+                    style={{ height: `${Math.max((day.count / maxDM) * 100, 4)}%` }}
+                  />
+                </div>
                 {/* Seven labels share a phone's width, so they must not wrap. */}
-                <span className="w-full truncate text-center text-[10px] text-zinc-500">
+                <span className="w-full truncate text-center font-mono text-[10px] text-muted">
                   {day.date}
                 </span>
               </div>
@@ -209,9 +224,7 @@ export default function DashboardPage() {
 
         {/* Top Keywords */}
         <div className="lg:col-span-1 panel rounded p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-foreground mb-4">
-            Palavras-chave que mais disparam
-          </h2>
+          <h2 className="rotulo mb-4">Palavras-chave que mais disparam</h2>
           <div className="space-y-3">
             {stats?.topKeywords.length === 0 && (
               <p className="text-sm text-muted py-8">
@@ -223,7 +236,9 @@ export default function DashboardPage() {
                 <span className="truncate text-sm font-medium text-foreground">
                   {keyword.keyword}
                 </span>
-                <span className="text-xs text-muted">{keyword.count}</span>
+                <span className="rounded-full bg-accent-soft px-2 py-0.5 font-mono text-xs text-accent tabular-nums">
+                  {keyword.count}
+                </span>
               </div>
             ))}
           </div>
@@ -231,9 +246,7 @@ export default function DashboardPage() {
 
         {/* Recent Activity */}
         <div className="lg:col-span-2 panel rounded p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-foreground mb-4">
-            Atividade recente
-          </h2>
+          <h2 className="rotulo mb-4">Atividade recente</h2>
           <div className="space-y-3 max-h-60 overflow-y-auto">
             {stats?.recentLogs.length === 0 && (
               <p className="text-sm text-muted text-center py-8">
@@ -269,9 +282,12 @@ export default function DashboardPage() {
           <Link
             key={action.href}
             href={action.href}
-            className="panel rounded p-4 transition-colors hover:border-border-hover"
+            className="panel group p-4 transition-colors hover:border-accent/40"
           >
-            <p className="text-sm font-medium text-foreground">{action.label}</p>
+            <p className="flex items-center justify-between text-sm font-medium text-foreground">
+              {action.label}
+              <span className="text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-accent">→</span>
+            </p>
             <p className="mt-1 text-xs text-muted">{action.hint}</p>
           </Link>
         ))}
