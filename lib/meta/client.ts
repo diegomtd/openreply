@@ -925,7 +925,11 @@ export async function createReelContainer(
   else body.video_url = input.videoUrl;
   if (input.coverUrl) body.cover_url = input.coverUrl;
   if (typeof input.thumbOffsetMs === "number") body.thumb_offset = input.thumbOffsetMs;
-  const response = await fetch(`${instagramGraphBase()}/${instagramAccountId}/media`, {
+  // 17/11: o graph.instagram.com ignora upload_type no corpo JSON e respondia "video_url is required".
+  // A doc da Meta manda os parâmetros na query; vão nos dois lugares.
+  const url = new URL(`${instagramGraphBase()}/${instagramAccountId}/media`);
+  for (const [k, v] of Object.entries(body)) url.searchParams.set(k, String(v));
+  const response = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(body),
