@@ -909,12 +909,20 @@ export async function createReelContainer(
   instagramAccountId: string,
   input: { videoUrl: string; caption: string; shareToFeed: boolean; coverUrl?: string | null; thumbOffsetMs?: number | null }
 ): Promise<{ id: string }> {
+  // 17/11: com video_url a Meta baixa o arquivo com prazo curto; servidor com upload lento entregava só
+  // o começo e o Reel saía com 1 a 5 segundos. Agora o padrão é o upload resumível: o Anzol baixa o MP4
+  // inteiro (mesma máquina, rápido), confere o tamanho e manda os bytes pra Meta com file_size explícito.
+  // OPENREPLY_PUBLISH_RESUMABLE=0 volta ao video_url.
+  const resumable = process.env.OPENREPLY_PUBLISH_RESUMABLE !== "0";
+  let video: Buffer | null = null;
+  if (resumable) video = await fetchWholeVideo(input.videoUrl);
   const body: Record<string, unknown> = {
     media_type: "REELS",
-    video_url: input.videoUrl,
     caption: input.caption,
     share_to_feed: input.shareToFeed,
   };
+  if (resumable) body.upload_type = "resumable";
+  else body.video_url = input.videoUrl;
   if (input.coverUrl) body.cover_url = input.coverUrl;
   if (typeof input.thumbOffsetMs === "number") body.thumb_offset = input.thumbOffsetMs;
   const response = await fetch(`${instagramGraphBase()}/${instagramAccountId}/media`, {
@@ -922,7 +930,36 @@ export async function createReelContainer(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify(body),
   });
-  return handleResponse(response);
+  const c = await handleResponse<{ id: string; uri?: string }>(response);
+  if (video) await uploadVideoBytes(accessToken, c.id, video, c.uri);
+  return { id: c.id };
+}
+
+const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+
+export async function fetchWholeVideo(url: string): Promise<Buffer> {
+  const r = await fetch(url, { signal: AbortSignal.timeout(10 * 60 * 1000) });
+  if (!r.ok) throw new MetaApiError(r.status, undefined, undefined, `Não consegui baixar o vídeo (HTTP ${r.status}).`);
+  const declared = Number(r.headers.get("content-length") || 0);
+  if (declared > MAX_VIDEO_BYTES) throw new MetaApiError(400, undefined, undefined, "Vídeo maior que 300 MB.");
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (!buf.length || (declared && buf.length !== declared)) throw new MetaApiError(502, undefined, undefined, `Vídeo veio incompleto (${buf.length} de ${declared} bytes).`);
+  return buf;
+}
+
+export async function uploadVideoBytes(accessToken: string, containerId: string, video: Buffer, uri?: string) {
+  const target = uri && /^https:\/\/rupload\.facebook\.com\//.test(uri)
+    ? uri
+    : `https://rupload.facebook.com/ig-api-upload/${getMetaGraphApiVersion()}/${containerId}`;
+  const response = await fetch(target, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${accessToken}`, offset: "0", file_size: String(video.length), "Content-Type": "application/octet-stream" },
+    body: new Uint8Array(video),
+    signal: AbortSignal.timeout(15 * 60 * 1000),
+  });
+  const j = await handleResponse<{ success?: boolean }>(response);
+  if (j && j.success === false) throw new MetaApiError(502, undefined, undefined, "A Meta recusou o upload do vídeo.");
+  return j;
 }
 
 export async function getContainerStatus(
