@@ -913,7 +913,10 @@ export async function createReelContainer(
   // o começo e o Reel saía com 1 a 5 segundos. Agora o padrão é o upload resumível: o Anzol baixa o MP4
   // inteiro (mesma máquina, rápido), confere o tamanho e manda os bytes pra Meta com file_size explícito.
   // OPENREPLY_PUBLISH_RESUMABLE=0 volta ao video_url.
-  const resumable = process.env.OPENREPLY_PUBLISH_RESUMABLE !== "0";
+  // 17/11 noite: com token de Instagram Login (graph.instagram.com) a Meta não aceita o resumível
+  // ("video_url is required"; a doc diz que é só para Facebook Login for Business). Fica opcional
+  // (OPENREPLY_PUBLISH_RESUMABLE=1); o padrão é video_url, e a Firma manda o link do espelho rápido (Supabase).
+  const resumable = process.env.OPENREPLY_PUBLISH_RESUMABLE === "1";
   let video: Buffer | null = null;
   if (resumable) video = await fetchWholeVideo(input.videoUrl);
   const body: Record<string, unknown> = {
