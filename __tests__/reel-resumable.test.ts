@@ -19,6 +19,10 @@ describe("createReelContainer resumível", () => {
     const criar = JSON.parse(String(calls[1].init?.body));
     expect(criar.upload_type).toBe("resumable");
     expect(criar.video_url).toBeUndefined();
+    const q = new URL(calls[1].url).searchParams;
+    expect(q.get("upload_type")).toBe("resumable");
+    expect(q.get("media_type")).toBe("REELS");
+    expect(q.get("video_url")).toBeNull();
     const up = calls[2];
     expect(up.url).toBe("https://rupload.facebook.com/ig-api-upload/v23.0/1790001");
     const h = up.init?.headers as Record<string, string>;
