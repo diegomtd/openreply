@@ -6,6 +6,7 @@ describe("createReelContainer resumível", () => {
   afterEach(() => { vi.unstubAllGlobals(); delete process.env.OPENREPLY_PUBLISH_RESUMABLE; });
 
   it("baixa o vídeo inteiro e manda os bytes com file_size", async () => {
+    process.env.OPENREPLY_PUBLISH_RESUMABLE = "1";
     const video = new Uint8Array(1234).fill(7);
     const calls: { url: string; init?: RequestInit }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
@@ -34,12 +35,12 @@ describe("createReelContainer resumível", () => {
   it("vídeo incompleto não cria contêiner", async () => {
     const f = vi.fn(async () => new Response(new Uint8Array(10), { status: 200, headers: { "content-length": "999" } }));
     vi.stubGlobal("fetch", f);
+    process.env.OPENREPLY_PUBLISH_RESUMABLE = "1";
     await expect(createReelContainer("tok", "1789", { videoUrl: "https://firma/x.mp4", caption: "", shareToFeed: true })).rejects.toThrow(/incompleto/);
     expect(f).toHaveBeenCalledTimes(1);
   });
 
-  it("OPENREPLY_PUBLISH_RESUMABLE=0 usa video_url", async () => {
-    process.env.OPENREPLY_PUBLISH_RESUMABLE = "0";
+  it("padrão (Instagram Login) usa video_url", async () => {
     const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify({ id: "1790002" }), { status: 200 }));
     vi.stubGlobal("fetch", f);
     await createReelContainer("tok", "1789", { videoUrl: "https://firma/x.mp4", caption: "", shareToFeed: true });
