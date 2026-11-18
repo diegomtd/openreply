@@ -47,6 +47,9 @@ export const createBody = z
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().trim().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().trim().max(20).optional().nullable(),
+    // 18/11: 1ª DM curta com botão (curiosidade); o toque entrega a dmMessage com o link.
+    openingDmMessage: z.string().trim().max(1000).optional().nullable(),
+    openingDmButtonLabel: z.string().trim().max(20).optional().nullable(),
     sendFrequency: z.enum(["ONCE_PER_CONTACT", "ONCE_PER_POST"]).optional().default("ONCE_PER_CONTACT"),
     steps: z
       .array(
@@ -71,6 +74,9 @@ export const createBody = z
   })
   .refine((d) => Boolean(d.postId) !== d.pendingNextReel, {
     message: "Informe postId OU pendingNextReel=true (um dos dois).",
+  })
+  .refine((d) => !d.openingDmMessage === !d.openingDmButtonLabel, {
+    message: "openingDmMessage e openingDmButtonLabel vão juntos.",
   })
   .refine((d) => !d.requireFollow || (d.followPromptMessage && d.followPromptButtonLabel), {
     message: "requireFollow precisa de followPromptMessage e followPromptButtonLabel.",
@@ -165,6 +171,9 @@ export async function createAutomation(account: InstagramAccount, body: unknown)
       requireFollow: d.requireFollow,
       followPromptMessage: d.requireFollow ? d.followPromptMessage ?? null : null,
       followPromptButtonLabel: d.requireFollow ? d.followPromptButtonLabel ?? null : null,
+      openingDmEnabled: Boolean(d.openingDmMessage && d.openingDmButtonLabel),
+      openingDmMessage: d.openingDmMessage || null,
+      openingDmButtonLabel: d.openingDmButtonLabel || null,
       publicReplyEnabled: d.publicReplies.length > 0,
       publicReplyMessages: d.publicReplies,
       publicReplyMessage: d.publicReplies[0] ?? null,
