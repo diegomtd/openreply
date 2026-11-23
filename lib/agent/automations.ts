@@ -135,9 +135,45 @@ export async function listAutomations(account: InstagramAccount): Promise<Result
     where: { instagramAccountId: account.id },
     orderBy: { createdAt: "desc" },
     take: 100,
-    include: { _count: { select: { dmLogs: true } } },
+    include: {
+      _count: { select: { dmLogs: { where: { status: "SENT", dmSentAt: { not: null } } } } },
+    },
   });
-  return ok({ account: account.username, canActivate: agentCanActivate(), automations: rows.map(summary) });
+  const ids = rows.map((row) => row.id);
+  const where = { instagramAccountId: account.id, automationId: { in: ids } };
+  const comentariosReais = { ...where, commentId: { not: { contains: ":" } } };
+  const [comentarios, enviados, botoes] = await Promise.all([
+    prisma.dmLog.groupBy({
+      by: ["automationId"], where: { ...comentariosReais, status: { not: "SKIPPED_NO_MATCH" } }, _count: { _all: true },
+    }),
+    prisma.dmLog.groupBy({
+      by: ["automationId"], where: { ...comentariosReais, status: "SENT", dmSentAt: { not: null } }, _count: { _all: true },
+    }),
+    prisma.trackedLink.findMany({
+      where: { automationId: { in: ids }, workspaceId: account.workspaceId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        automationId: true, label: true,
+        _count: { select: { clicks: { where: { instagramAccountId: account.id } } } },
+      },
+    }),
+  ]);
+  const porRegra = <T extends { automationId: string; _count: { _all: number } }>(dados: T[]) =>
+    new Map(dados.map((d) => [d.automationId, d._count._all]));
+  const totalComentarios = porRegra(comentarios), totalEnviados = porRegra(enviados);
+  return ok({
+    account: account.username, canActivate: agentCanActivate(), automations: rows.map((row) => {
+      const buttons = botoes.filter((b) => b.automationId === row.id).map((b, index) => ({
+        label: b.label?.trim() || `Link ${index + 1}`, clicks: b._count.clicks,
+      }));
+      return { ...summary(row), funnel: {
+        commentTriggers: totalComentarios.get(row.id) ?? 0,
+        commentDmsSent: totalEnviados.get(row.id) ?? 0,
+        linkClicks: buttons.reduce((total, button) => total + button.clicks, 0),
+        buttons,
+      } };
+    }),
+  });
 }
 
 export async function createAutomation(account: InstagramAccount, body: unknown): Promise<Result> {

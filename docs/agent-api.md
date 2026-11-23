@@ -31,10 +31,12 @@ Toda chamada leva `Authorization: Bearer <chave>`. A chave dá leitura de DMs e 
 | GET | `/api/agent/v1/logs?since=ISO` | envios e skips das automações |
 | GET | `/api/agent/v1/accounts/:conta/discovery/:perfil?limit=25` | radar: seguidores e últimos posts (curtidas, comentários, views) de outro perfil profissional, com `engagementRate` e `viewsPerFollower` |
 
-| GET | `/api/agent/v1/accounts/:conta/automations` | automações da conta (`byAgent`, `isActive`, envios) |
+| GET | `/api/agent/v1/accounts/:conta/automations` | automações da conta com directs enviados e `funnel` agregado |
 | POST | `/api/agent/v1/accounts/:conta/automations` `{name, postId \| pendingNextReel, keywords, dmMessage, linkUrl?, linkButtonLabel?, publicReplies?, requireFollow?, sendFrequency?, steps?, stopOnReply?, dmTrigger?}` | cria automação de comentário (nasce desligada). `steps`: até 3 `{message, delayMinutes, condition: ALWAYS\|NOT_CLICKED\|CLICKED}` com soma ≤ 24 h; `stopOnReply` (padrão `true`) tira o robô quando a pessoa responde; `dmTrigger` também dispara com a palavra no direct |
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/pause` | desliga |
 | POST | `/api/agent/v1/accounts/:conta/automations/:id/activate` | liga, só com `OPENREPLY_AGENT_CAN_ACTIVATE=1` |
+
+A leitura de automações usa `sent` para directs aceitos com horário de envio registrado. `funnel` retorna `commentTriggers`, `commentDmsSent`, `linkClicks` e `buttons` (rótulo e cliques). Os cliques incluem todos os gatilhos da regra. Os contadores são acumulados e a resposta não identifica contatos.
 
 | POST | `/api/agent/v1/accounts/:conta/publish` `{videoUrl, caption, shareToFeed?, coverUrl?, thumbOffsetMs?}` | cria o contêiner do Reel (a Meta baixa o vídeo do link https público). Só com `OPENREPLY_AGENT_CAN_PUBLISH=1` |
 | GET | `/api/agent/v1/accounts/:conta/publish/:containerId` | status: `IN_PROGRESS`, `FINISHED`, `ERROR`, `EXPIRED`, `PUBLISHED` |
