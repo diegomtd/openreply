@@ -8,6 +8,8 @@ const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
     instagramAccount: { findFirst: vi.fn(), findMany: vi.fn() },
     automation: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
+    dmLog: { groupBy: vi.fn() },
+    trackedLink: { findMany: vi.fn() },
     contact: { findFirst: vi.fn(), update: vi.fn() },
   },
 }));
@@ -35,6 +37,25 @@ beforeEach(() => {
 });
 
 describe("automações pela API de agentes", () => {
+  it("retorna métricas agregadas apenas da conta e separa direct dos cliques", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([row({ _count: { dmLogs: 2 } })]);
+    mockPrisma.dmLog.groupBy.mockResolvedValueOnce([{ automationId: "a1", _count: { _all: 3 } }])
+      .mockResolvedValueOnce([{ automationId: "a1", _count: { _all: 2 } }]);
+    mockPrisma.trackedLink.findMany.mockResolvedValue([
+      { automationId: "a1", label: "App Store", _count: { clicks: 4 } },
+      { automationId: "a1", label: "Site", _count: { clicks: 1 } },
+    ]);
+    const res = await req("GET", "accounts/acc1/automations");
+    expect(res).toMatchObject({ status: 200, body: { automations: [{ sent: 2,
+      funnel: { commentTriggers: 3, commentDmsSent: 2, linkClicks: 5,
+        buttons: [{ label: "App Store", clicks: 4 }, { label: "Site", clicks: 1 }] },
+    }] } });
+    expect(mockPrisma.dmLog.groupBy.mock.calls[1][0].where).toMatchObject({
+      instagramAccountId: "acc1", status: "SENT", dmSentAt: { not: null }, commentId: { not: { contains: ":" } },
+    });
+    expect(mockPrisma.trackedLink.findMany.mock.calls[0][0].where).toMatchObject({ workspaceId: "ws1" });
+  });
+
   it("cria sempre desligada, marcada como do agente, com link rastreado", async () => {
     const res = await req("POST", "accounts/acc1/automations", valido);
     expect(res.status).toBe(201);
