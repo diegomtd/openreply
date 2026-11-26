@@ -902,12 +902,14 @@ export async function getBusinessDiscovery(
 // instagram_business_content_publish no login da conta. Limite da Meta: 100
 // posts publicados pela API em 24 h por conta (/content_publishing_limit).
 
+export type TrialStrategy = "MANUAL" | "SS_PERFORMANCE";
+
 export type ContainerStatus = "IN_PROGRESS" | "FINISHED" | "ERROR" | "EXPIRED" | "PUBLISHED";
 
 export async function createReelContainer(
   accessToken: string,
   instagramAccountId: string,
-  input: { videoUrl: string; caption: string; shareToFeed: boolean; coverUrl?: string | null; thumbOffsetMs?: number | null }
+  input: { videoUrl: string; caption: string; shareToFeed: boolean; coverUrl?: string | null; thumbOffsetMs?: number | null; trial?: TrialStrategy | null }
 ): Promise<{ id: string }> {
   // 17/11: com video_url a Meta baixa o arquivo com prazo curto; servidor com upload lento entregava só
   // o começo e o Reel saía com 1 a 5 segundos. Agora o padrão é o upload resumível: o Anzol baixa o MP4
@@ -916,7 +918,7 @@ export async function createReelContainer(
   // 17/11 noite: com token de Instagram Login (graph.instagram.com) a Meta não aceita o resumível
   // ("video_url is required"; a doc diz que é só para Facebook Login for Business). Fica opcional
   // (OPENREPLY_PUBLISH_RESUMABLE=1); o padrão é video_url, e a Firma manda o link do espelho rápido (Supabase).
-  const resumable = process.env.OPENREPLY_PUBLISH_RESUMABLE === "1";
+  const resumable = process.env.OPENREPLY_PUBLISH_RESUMABLE === "1" && !input.trial;
   let video: Buffer | null = null;
   if (resumable) video = await fetchWholeVideo(input.videoUrl);
   const body: Record<string, unknown> = {
@@ -928,6 +930,9 @@ export async function createReelContainer(
   else body.video_url = input.videoUrl;
   if (input.coverUrl) body.cover_url = input.coverUrl;
   if (typeof input.thumbOffsetMs === "number") body.thumb_offset = input.thumbOffsetMs;
+  // 26/11: Reel de teste (trial reel). A Meta mostra só pra quem não segue; MANUAL = o Diego gradua no app,
+  // SS_PERFORMANCE = a Meta gradua sozinha se for bem. Só existe no upload padrão (video_url).
+  if (input.trial) body.trial_params = JSON.stringify({ graduation_strategy: input.trial });
   // 17/11: o graph.instagram.com ignora upload_type no corpo JSON e respondia "video_url is required".
   // A doc da Meta manda os parâmetros na query; vão nos dois lugares.
   const url = new URL(`${instagramGraphBase()}/${instagramAccountId}/media`);
