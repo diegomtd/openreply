@@ -47,4 +47,16 @@ describe("createReelContainer resumível", () => {
     expect(f).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(f.mock.calls[0][1]?.body)).video_url).toBe("https://firma/x.mp4");
   });
+
+  it("Reel de teste manda trial_params e não usa o resumível", async () => {
+    process.env.OPENREPLY_PUBLISH_RESUMABLE = "1";
+    const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify({ id: "1790003" }), { status: 200 }));
+    vi.stubGlobal("fetch", f);
+    await createReelContainer("tok", "1789", { videoUrl: "https://firma/x.mp4", caption: "", shareToFeed: true, trial: "SS_PERFORMANCE" });
+    expect(f).toHaveBeenCalledTimes(1);
+    const corpo = JSON.parse(String(f.mock.calls[0][1]?.body));
+    expect(corpo.video_url).toBe("https://firma/x.mp4");
+    expect(JSON.parse(corpo.trial_params)).toEqual({ graduation_strategy: "SS_PERFORMANCE" });
+    expect(new URL(String(f.mock.calls[0][0])).searchParams.get("trial_params")).toBe('{"graduation_strategy":"SS_PERFORMANCE"}');
+  });
 });

@@ -494,6 +494,8 @@ const publishBody = z.object({
   shareToFeed: z.boolean().default(true),
   coverUrl: z.string().url().max(2000).nullable().optional(),
   thumbOffsetMs: z.number().int().min(0).max(900_000).nullable().optional(),
+  // 26/11: Reel de teste (trial reel da Meta): sai só pra quem não segue até graduar.
+  trial: z.enum(["MANUAL", "SS_PERFORMANCE"]).nullable().optional(),
 });
 const CONTAINER_ID = /^[0-9]{5,30}$/;
 

@@ -57,6 +57,15 @@ describe("POST accounts/:c/publish", () => {
     expect(meta.createReelContainer).toHaveBeenCalledWith("token", "1789", expect.objectContaining({ videoUrl: "https://firma.oceanoazul.tech/baixar/x.mp4", caption: "Legenda #ia", shareToFeed: true }));
   });
 
+  it("Reel de teste passa a estratégia de graduação e recusa valor inventado", async () => {
+    vi.stubEnv("OPENREPLY_AGENT_CAN_PUBLISH", "1");
+    meta.createReelContainer.mockResolvedValue({ id: "17900000002" });
+    const r = await req("POST", "accounts/i_mdiego/publish", { videoUrl: "https://x.com/a.mp4", caption: "c", trial: "MANUAL" });
+    expect(r.status).toBe(200);
+    expect(meta.createReelContainer).toHaveBeenCalledWith("token", "1789", expect.objectContaining({ trial: "MANUAL" }));
+    expect((await req("POST", "accounts/i_mdiego/publish", { videoUrl: "https://x.com/a.mp4", trial: "SEMPRE" })).status).toBe(400);
+  });
+
   it("recusa link sem https e legenda com hashtag demais", async () => {
     vi.stubEnv("OPENREPLY_AGENT_CAN_PUBLISH", "1");
     expect((await req("POST", "accounts/i_mdiego/publish", { videoUrl: "http://x.com/a.mp4" })).status).toBe(400);
